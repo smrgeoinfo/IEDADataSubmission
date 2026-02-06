@@ -19,6 +19,7 @@ services:
     volumes:
       - ./dspback:/dspback
     entrypoint: bash dev-entrypoint.sh
+    env_file: .env
     build:
       context: ./dspback
       dockerfile: Dockerfile-dev
