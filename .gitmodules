@@ -6,3 +6,7 @@
 	path = dspfront
 	url = https://github.com/smrgeoinfo/dspfront.git
 	branch = develop
+[submodule "OCGbuildingBlockTest"]
+	path = OCGbuildingBlockTest
+	url = https://github.com/smrgeoinfo/OCGbuildingBlockTest.git
+	branch = master
