@@ -231,6 +231,17 @@ ADA metadata forms are now driven directly by OGC Building Block schemas rather 
 
 **Local dev**: Run `python tools/cors_server.py` from the `OCGbuildingBlockTest/build/jsonforms` directory to serve schemas on `http://localhost:8090` with CORS headers. The form component's `BB_BASE_URL` must be set to the local server URL during development.
 
+### Adding a New ADA Profile
+
+To add a new technique profile (e.g., `adaXRF`):
+
+1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. Copy from an existing technique profile (e.g., `adaEMPA`).
+2. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
+3. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`.
+4. **Frontend profile selection** — Add `{ key: 'adaXRF' }` to the `profiles` array in `dspfront/src/components/metadata/cz.ada-select-type.vue`.
+5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/cz.ada-profile-form.vue`.
+6. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
+
 ## Deployment
 
 Three Docker Compose configurations at the repo root:
