@@ -120,6 +120,41 @@ GitHub Pages (OCGbuildingBlockTest)          Frontend (dspfront)
 
 Five profiles are supported: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific with enum constraints on `schema:additionalType` and `schema:measurementTechnique`).
 
+#### Adding a New ADA Profile
+
+To add a new technique profile (e.g., `adaXRF`):
+
+**1. OGC Building Block** (`OCGbuildingBlockTest/_sources/profiles/adaXRF/`)
+
+Create the BB directory with `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. See an existing technique profile (e.g., `adaEMPA`) as a template.
+
+**2. JSON Forms static files** (`OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/`)
+
+Create `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust default values (e.g., `schema:additionalType`, `schema:measurementTechnique`).
+
+**3. Schema conversion** (`OCGbuildingBlockTest/tools/convert_for_jsonforms.py`)
+
+Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list so the conversion script processes it. The generated `schema.json` will appear in `build/jsonforms/profiles/adaXRF/`.
+
+**4. Frontend profile selection** (`dspfront/src/components/metadata/cz.ada-select-type.vue`)
+
+Add `{ key: 'adaXRF' }` to the `profiles` array.
+
+**5. Frontend form title** (`dspfront/src/components/metadata/cz.ada-profile-form.vue`)
+
+Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in the `formTitle` getter.
+
+**6. i18n strings** (`dspfront/src/i18n/messages.ts`)
+
+Add the profile entry under `metadata.ada.profiles`:
+
+```ts
+adaXRF: {
+  name: `X-Ray Fluorescence (XRF)`,
+  description: `Metadata for X-ray fluorescence datasets.`,
+},
+```
+
 ### dspfront — Frontend Application
 
 Vue.js single-page application for browsing repositories, filling metadata forms, and managing submissions.
