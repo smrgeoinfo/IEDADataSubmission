@@ -1,6 +1,0 @@
-$schema: https://json-schema.org/draft/2020-12/schema
-title: Has Part File Type
-description: >-
-  Describes files within an archive distribution (e.g., files inside a zip archive).
-  Extends the files type pattern for use within schema:hasPart arrays.
-$ref: ../files/schema.yaml

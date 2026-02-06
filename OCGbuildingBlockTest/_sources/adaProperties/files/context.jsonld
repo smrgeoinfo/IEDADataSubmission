@@ -1,7 +1,0 @@
-{
-  "@context": {
-    "schema": "http://schema.org/",
-    "ada": "https://ada.astromat.org/metadata/",
-    "spdx": "http://spdx.org/rdf/terms#"
-  }
-}
