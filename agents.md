@@ -77,7 +77,14 @@ Frontend models extend `Repository` (in `models/repository.model.ts`). Each repo
 
 ### OGC Building Blocks
 
-Complex schemas (like ADA's 37 `$defs`) are decomposed into modular directories under `OCGbuildingBlockTest/_sources/`. Each building block has `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. Cross-references use relative `$ref` paths. The top-level profile (`profiles/adaProduct/`) composes all blocks.
+Complex schemas (like ADA's 37 `$defs`) are decomposed into modular directories under `OCGbuildingBlockTest/_sources/`. Each building block has `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The top-level profile (`profiles/adaProduct/`) composes all blocks.
+
+**Important authoring rules** (the validate-and-process GitHub Actions workflow enforces these):
+
+- **`bblock.json`** must include all required fields: `$schema`, `name`, `abstract`, `status`, `dateTimeAddition`, `itemClass`, `register`, `version`, `dateOfLastChange`, `link`, `maturity`, `scope`, `tags`, `sources`
+- **`schema.yaml` cross-references** must use relative `$ref` paths to `schema.yaml` files, **not** standalone `.json` schema files. The postprocess tool resolves `$ref` to GitHub Pages URLs — `.json` refs cause 404s.
+- **`examples.yaml`** snippet `ref:` must match the actual filename in the BB directory
+- **`examples.yaml`** schema prefix must be `schema: http://schema.org/` (http, not https, with trailing slash)
 
 ## How to Add a New Repository Type
 

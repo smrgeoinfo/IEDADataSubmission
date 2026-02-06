@@ -163,10 +163,13 @@ OCGbuildingBlockTest/_sources/
 ```
 
 Each building block directory contains:
-- `bblock.json` — Metadata (name, status, tags, sources)
-- `schema.yaml` — JSON Schema with `$ref` cross-references to other BBs
+- `bblock.json` — Metadata (name, status, tags, sources, `dateOfLastChange`, `link`, etc.)
+- `schema.yaml` — JSON Schema with `$ref` cross-references to other BBs (must reference `schema.yaml`, not `.json` files)
 - `context.jsonld` — JSON-LD namespace prefix mappings
 - `description.md` — Human-readable description
+- `examples.yaml` — (optional) Example snippets with `ref:` pointing to example JSON files
+
+A GitHub Actions workflow (`Validate and process Building Blocks`) runs on every push to validate all building blocks. See `agents.md` for detailed authoring rules.
 
 #### Vocabulary Namespaces
 
