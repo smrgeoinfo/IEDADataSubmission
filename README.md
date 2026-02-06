@@ -2,15 +2,15 @@
 
 A web application for submitting, managing, and discovering research data across multiple Earth Science repositories. This monorepo contains the backend API, frontend application, deployment configuration, and OGC Building Blocks for schema modularization.
 
-`dspback` and `dspfront` are included as [git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) pointing to their respective repositories on the `develop` branch.
+`dspback`, `dspfront`, and `OCGbuildingBlockTest` are included as [git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) pointing to their respective repositories.
 
 ## Repository Structure
 
 ```
 IEDADataSubmission/
-├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback)
-├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront)
-├── OCGbuildingBlockTest/    # OGC Building Block schemas (YAML/JSON-LD)
+├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback, develop)
+├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront, develop)
+├── OCGbuildingBlockTest/    # OGC Building Blocks (submodule → smrgeoinfo/OCGbuildingBlockTest, master)
 ├── scrapers/                # Repository metadata scrapers
 ├── jsonld/                  # JSON-LD normalization examples
 ├── nginx/                   # Nginx reverse proxy configs

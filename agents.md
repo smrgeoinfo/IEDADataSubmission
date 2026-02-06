@@ -6,13 +6,13 @@ This document explains what this project is, how it works, and how to navigate t
 
 The IEDA Data Submission Portal (repo: `smrgeoinfo/IEDADataSubmission`) is a web application that lets Earth Science researchers submit, manage, and discover research data across multiple repositories from a single interface. Researchers log in once with their ORCID, fill out standardized metadata forms, and submit to repositories like HydroShare, EarthChem, Zenodo, and ADA (Astromat Data Archive).
 
-The project is a monorepo with three main components. `dspback` and `dspfront` are git submodules (tracking `develop` branch from `smrgeoinfo/dspback` and `smrgeoinfo/dspfront` respectively):
+The project is a monorepo with three main components, all included as git submodules:
 
-| Component | Stack | Purpose |
-|---|---|---|
-| `dspback/` | FastAPI, MongoDB (Motor/Beanie), Python | REST API for metadata CRUD, auth, search |
-| `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | SPA for forms, submissions, discovery |
-| `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | Modular schema components (OGC Building Blocks) |
+| Component | Stack | Submodule | Purpose |
+|---|---|---|---|
+| `dspback/` | FastAPI, MongoDB (Motor/Beanie), Python | `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
+| `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | `smrgeoinfo/dspfront` (`develop`) | SPA for forms, submissions, discovery |
+| `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | `smrgeoinfo/OCGbuildingBlockTest` (`master`) | Modular schema components (OGC Building Blocks) |
 
 ## How It Works End-to-End
 
