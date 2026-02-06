@@ -1,0 +1,8 @@
+[submodule "dspback"]
+	path = dspback
+	url = https://github.com/smrgeoinfo/dspback.git
+	branch = develop
+[submodule "dspfront"]
+	path = dspfront
+	url = https://github.com/smrgeoinfo/dspfront.git
+	branch = develop
