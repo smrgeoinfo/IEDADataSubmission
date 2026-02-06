@@ -79,6 +79,8 @@ Frontend models extend `Repository` (in `models/repository.model.ts`). Each repo
 
 Complex schemas (like ADA's 37 `$defs`) are decomposed into modular directories under `OCGbuildingBlockTest/_sources/`. Each building block has `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The top-level profile (`profiles/adaProduct/`) composes all blocks.
 
+Instrument-specific detail types (EMPA, XRD, NanoSIMS, etc.) are each in their own BB directory under `adaProperties/detailXxx/` (e.g., `detailEMPA/`, `detailXRD/`). This allows technique profiles to `$ref` only the specific detail type(s) they need (e.g., `$ref: ../detailEMPA/schema.yaml`) instead of using fragment pointers into a monolithic file. The old `details/` BB is now an umbrella schema that references all 16 detail BBs via `anyOf`.
+
 **Important authoring rules** (the validate-and-process GitHub Actions workflow enforces these):
 
 - **`bblock.json`** must include all required fields: `$schema`, `name`, `abstract`, `status`, `dateTimeAddition`, `itemClass`, `register`, `version`, `dateOfLastChange`, `link`, `maturity`, `scope`, `tags`, `sources`

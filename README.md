@@ -213,7 +213,23 @@ OCGbuildingBlockTest/_sources/
 │   ├── spatialRegistration/   # Pixel coordinate system registration
 │   ├── instrument/            # NXinstrument + prov:Entity analytical instruments
 │   ├── laboratory/            # NXsource + schema:Place facilities
-│   ├── details/               # 16 instrument-specific detail types (EMPA, XRD, NanoSIMS, etc.)
+│   ├── details/               # Umbrella schema referencing all 16 detail type BBs
+│   ├── detailARGT/            # ARGT (Argon) document detail
+│   ├── detailBasemap/         # Basemap images with RGB channels and pixel scaling
+│   ├── detailDSC/             # Differential Scanning Calorimetry detail
+│   ├── detailEAIRMS/          # EA-IRMS collection detail
+│   ├── detailEMPA/            # Electron Microprobe Analysis detail
+│   ├── detailICPOES/          # ICP-OES detail
+│   ├── detailL2MS/            # Laser-2 Mass Spectrometry detail
+│   ├── detailLAF/             # Laser Ablation Fluorescence detail
+│   ├── detailNanoIR/          # Nano-IR spectroscopy detail
+│   ├── detailNanoSIMS/        # NanoSIMS detail
+│   ├── detailPSFD/            # Point Spread Function Data detail
+│   ├── detailQRIS/            # QRIS (Raman) detail
+│   ├── detailSLS/             # Structured Light Scanning detail
+│   ├── detailVNMIR/           # Very-Near Mid-IR spectroscopy detail
+│   ├── detailXCT/             # X-ray Computed Tomography detail
+│   ├── detailXRD/             # X-ray Diffraction detail
 │   ├── physicalMapping/       # DDI-CDI WideDataStructure variable mapping
 │   ├── image/                 # ada:image with componentType classification
 │   ├── imageMap/              # Spatially registered image maps
