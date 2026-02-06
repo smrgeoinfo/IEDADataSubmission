@@ -1,0 +1,7 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: String Array Type
+description: Simple reusable array of strings
+type: array
+minItems: 0
+items:
+  type: string

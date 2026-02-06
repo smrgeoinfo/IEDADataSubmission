@@ -1,0 +1,25 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Analysis Instrument Type
+description: >-
+  Analytical instrument definition combining NeXus NXinstrument base class
+  with PROV-O Entity. Used to describe instruments involved in analysis events.
+type: object
+properties:
+  "@type":
+    const:
+      - "schema:Thing"
+      - "prov:Entity"
+      - "nxs:BaseClass/NXinstrument"
+  "schema:additionalType":
+    description: >-
+      Identifier for an instrument or component in the analytical instrumentation,
+      e.g. GCMD instrument identifier.
+    type: array
+    items:
+      type: string
+  "schema:name":
+    type: string
+  "schema:description":
+    type: string
+  "schema:identifier":
+    type: string

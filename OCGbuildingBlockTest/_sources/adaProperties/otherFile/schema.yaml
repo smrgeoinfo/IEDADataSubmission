@@ -1,0 +1,36 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Other File Type
+description: >-
+  Files in other widely-used formats approved for submission to the Astromat Archive.
+  Includes EMSA, OBJ, STL, XLSX, and Neptune Plus export formats.
+type: object
+properties:
+  "@type":
+    const:
+      - "ada:otherFileType"
+  componentType:
+    anyOf:
+      - type: object
+        properties:
+          "@type":
+            enum:
+              - "ada:other"
+        required:
+          - "@type"
+      - $ref: ../details/schema.yaml#/$defs/slsshapemodel_detail
+  "schema:encodingFormat":
+    description: One of the approved non-standard file formats
+    enum:
+      - "Spectral Data Exchange File (.emsa)"
+      - "3D model file (.obj)"
+      - "Standard Triangle Language (.stl)"
+      - "Open XML workbook (.xlsx)"
+      - "Neptune Plus export (.exp)"
+  formatDescription:
+    type: string
+    description: >-
+      Free text explanation of file format, or a link to a publicly accessible
+      specification for the format.
+required:
+  - "@type"
+  - componentType

@@ -1,0 +1,60 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Image Type
+description: >-
+  Image objects with acquisition details and component type classification.
+  Typed as ada:image and schema:ImageObject.
+type: object
+properties:
+  "@type":
+    const:
+      - "ada:image"
+      - "schema:ImageObject"
+    description: GeneralType for images
+  acquisitionTime:
+    type: string
+  componentType:
+    type: object
+    properties:
+      "@type":
+        enum:
+          - "ada:AIVAImage"
+          - "ada:EMPAImage"
+          - "ada:LITImage"
+          - "ada:STEMImage"
+          - "ada:TEMImage"
+          - "ada:TEMPatternsImage"
+          - "ada:UVFMImage"
+          - "ada:VLMImage"
+          - "ada:SEMEBSDGrainImage"
+          - "ada:SEMEDSElementalMap"
+          - "ada:SEMHRCLImage"
+          - "ada:SEMImageCollection"
+          - "ada:TEMEDSImageCollection"
+          - "ada:NanoSIMSImage"
+          - "ada:XANESImageStack"
+          - "ada:XANESStackOverviewImage"
+          - "ada:XRDDiffractionPattern"
+          - "ada:ShapeModelImage"
+    required:
+      - "@type"
+  channel1:
+    type: string
+  channel2:
+    type: string
+  channel3:
+    type: string
+  pixelSize:
+    type: string
+  illuminationType:
+    type: string
+    description: >-
+      Type of illumination used to create the image. Examples include
+      Visible light, Cross-polarized visible light, ultraviolet light, Electron beam, X-ray.
+  imageType:
+    type: string
+    description: >-
+      Specifies the nature of the sample's response to the illumination that was
+      detected and measured.
+required:
+  - "@type"
+  - componentType

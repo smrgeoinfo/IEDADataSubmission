@@ -1,0 +1,63 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Image Map Type
+description: >-
+  Spatially registered image maps with pixel coordinates, component type
+  classification, and spatial registration metadata.
+type: object
+properties:
+  "@type":
+    const:
+      - "ada:imageMap"
+      - "schema:ImageObject"
+  acquisitionTime:
+    type: string
+  componentType:
+    anyOf:
+      - $ref: ../details/schema.yaml#/$defs/empa_detail
+      - type: object
+        properties:
+          "@type":
+            enum:
+              - "basemap"
+              - "supplementalBasemap"
+              - "L2MSOverviewImage"
+              - "NanoIRMap"
+              - "LITImage"
+              - "UVFMImage"
+              - "VLMImage"
+              - "SEMEBSDGrainImageMap"
+              - "SEMEDSElementalMap"
+              - "SEMHRCLMap"
+              - "SEMImageMap"
+              - "STEMImage"
+              - "TEMImage"
+              - "TEMPatternsImage"
+              - "VLMImage"
+              - "NanoSIMSMap"
+              - "XANESimage"
+              - "VNMIROverviewImage"
+        required:
+          - "@type"
+  channel1:
+    type: string
+  channel2:
+    type: string
+  channel3:
+    type: string
+  illuminationType:
+    type: string
+    description: >-
+      Type of illumination used to create the image.
+  imageType:
+    type: string
+    description: >-
+      Specifies the nature of the sample's response to the illumination.
+  numPixelsX:
+    type: integer
+  numPixelsY:
+    type: integer
+  spatialRegistration:
+    $ref: ../spatialRegistration/schema.yaml
+required:
+  - "@type"
+  - componentType

@@ -1,0 +1,27 @@
+version: '3'
+
+services:
+
+  nginx:
+    image: nginx:1.17.10
+    container_name: dsp_nginx
+    volumes:
+      - ./nginx/nginx-dev.conf:/etc/nginx/nginx.conf
+      - ./nginx/config:/etc/ssl
+    ports:
+      - 443:443
+    depends_on:
+      - dspback
+
+  dspback:
+    image: dspback
+    container_name: dspback
+    volumes:
+      - ./dspback:/dspback
+    entrypoint: bash dev-entrypoint.sh
+    build:
+      context: ./dspback
+      dockerfile: Dockerfile-dev
+    ports:
+      - 5002:5002
+    restart: on-failure

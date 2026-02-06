@@ -1,0 +1,18 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Analysis Laboratory Type
+description: >-
+  Laboratory or facility definition combining NeXus NXsource with schema:Place.
+  Used to identify the location where analysis was performed.
+type: object
+properties:
+  "@type":
+    const:
+      - "schema:Place"
+      - "nxs:BaseClass/NXsource"
+  "schema:identifier":
+    type: string
+    format: uri
+  "schema:name":
+    type: string
+  "schema:alternateName":
+    type: string

@@ -1,0 +1,8 @@
+*/__pycache__
+*/*/__pycache__
+db-data
+.vscode/
+.idea/
+.claude/
+.env
+node_modules/

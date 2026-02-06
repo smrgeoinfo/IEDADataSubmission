@@ -1,0 +1,16 @@
+{
+  "$schema": "metaschema.yaml",
+  "name": "Image Map Type",
+  "abstract": "Spatially registered image map with pixel coordinates and component types",
+  "status": "under-development",
+  "dateTimeAddition": "2026-02-05T00:00:00Z",
+  "itemClass": "schema",
+  "register": "cdif-building-block-register",
+  "version": "0.1",
+  "maturity": "draft",
+  "scope": "unstable",
+  "tags": ["ada", "astromat", "image", "spatial"],
+  "sources": [
+    {"title": "ADA Metadata Schema v3", "link": "https://github.com/amds-ldeo/metadata"}
+  ]
+}
