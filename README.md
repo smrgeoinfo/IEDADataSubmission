@@ -1,13 +1,15 @@
-# CriticalZone Data Submission Portal
+# IEDA Data Submission Portal
 
 A web application for submitting, managing, and discovering research data across multiple Earth Science repositories. This monorepo contains the backend API, frontend application, deployment configuration, and OGC Building Blocks for schema modularization.
+
+`dspback` and `dspfront` are included as [git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) pointing to their respective repositories on the `develop` branch.
 
 ## Repository Structure
 
 ```
-CriticalZone/
-├── dspback/                 # FastAPI backend (Python)
-├── dspfront/                # Vue.js frontend (TypeScript)
+IEDADataSubmission/
+├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback)
+├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront)
 ├── OCGbuildingBlockTest/    # OGC Building Block schemas (YAML/JSON-LD)
 ├── scrapers/                # Repository metadata scrapers
 ├── jsonld/                  # JSON-LD normalization examples
@@ -180,6 +182,18 @@ Each building block directory contains:
 | `dcterms` | `http://purl.org/dc/terms/` | Conformance declarations |
 
 ## Getting Started
+
+### Clone
+
+```bash
+git clone --recurse-submodules https://github.com/smrgeoinfo/IEDADataSubmission.git
+```
+
+If you already cloned without `--recurse-submodules`, initialize them after the fact:
+
+```bash
+git submodule update --init --recursive
+```
 
 ### Prerequisites
 

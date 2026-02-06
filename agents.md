@@ -1,12 +1,12 @@
-# Agents Guide: CriticalZone Data Submission Portal
+# Agents Guide: IEDA Data Submission Portal
 
 This document explains what this project is, how it works, and how to navigate the codebase when making changes.
 
 ## What This Project Is
 
-The CriticalZone Data Submission Portal is a web application that lets Earth Science researchers submit, manage, and discover research data across multiple repositories from a single interface. Researchers log in once with their ORCID, fill out standardized metadata forms, and submit to repositories like HydroShare, EarthChem, Zenodo, and ADA (Astromat Data Archive).
+The IEDA Data Submission Portal (repo: `smrgeoinfo/IEDADataSubmission`) is a web application that lets Earth Science researchers submit, manage, and discover research data across multiple repositories from a single interface. Researchers log in once with their ORCID, fill out standardized metadata forms, and submit to repositories like HydroShare, EarthChem, Zenodo, and ADA (Astromat Data Archive).
 
-The project is a monorepo with three main components:
+The project is a monorepo with three main components. `dspback` and `dspfront` are git submodules (tracking `develop` branch from `smrgeoinfo/dspback` and `smrgeoinfo/dspfront` respectively):
 
 | Component | Stack | Purpose |
 |---|---|---|
