@@ -26,7 +26,7 @@ IEDADataSubmission/
 
 FastAPI application providing a standardized metadata API across multiple repository types.
 
-- **Framework:** FastAPI with async MongoDB (Motor/Beanie)
+- **Framework:** FastAPI with async PostgreSQL (SQLAlchemy + asyncpg)
 - **Authentication:** ORCID OAuth2 for users, per-repository OAuth2 for repository access
 - **Schema-driven forms:** Each repository has a JSON Schema, UI Schema, and defaults file that drive dynamic form generation on the frontend
 
@@ -47,8 +47,13 @@ dspback/dspback/
 ├── api.py                  # FastAPI app setup, router registration, middleware
 ├── pydantic_schemas.py     # RepositoryType enum, record models (Zenodo, HydroShare, EarthChem, External, ADA)
 ├── config/__init__.py      # Settings, OAuth config, repository_config dict
+├── database/
+│   ├── models.py           # SQLAlchemy ORM models (UserDB, SubmissionDB, RepositoryTokenDB)
+│   ├── session.py          # Async engine, get_session() FastAPI dependency
+│   ├── converters.py       # ORM ↔ Pydantic converters
+│   └── procedures.py       # DB procedures (INSERT...ON CONFLICT upserts)
 ├── routers/
-│   ├── ada.py              # ADA CRUD endpoints
+│   ├── ada.py              # ADA CRUD endpoints + JSON-LD ingest
 │   ├── external.py         # External dataset CRUD endpoints
 │   ├── hydroshare.py       # HydroShare integration
 │   ├── zenodo.py           # Zenodo integration
@@ -92,6 +97,29 @@ Key mappings:
 
 The existing `POST /api/metadata/ada` endpoint (flat JSON) remains unchanged for the CZ Net frontend forms.
 
+#### Phase 2: BB-Driven ADA Form Builder
+
+ADA metadata forms are now driven directly by OGC Building Block schemas rather than the backend-served `schema.json`. The frontend fetches resolved JSON Schema, UISchema, and default values from GitHub Pages (or a local dev server) per profile, renders the form with CzForm (JSON Forms), and POSTs the resulting JSON-LD directly to `/api/metadata/ada/jsonld`.
+
+```
+GitHub Pages (OCGbuildingBlockTest)          Frontend (dspfront)
+┌──────────────────────────────────┐    ┌──────────────────────────┐
+│ build/jsonforms/profiles/        │    │ /metadata/ada            │
+│   adaProduct/                    │◄───│   → profile selection    │
+│     schema.json  (Draft 7)       │    │ /metadata/ada/:profile   │
+│     uischema.json                │    │   → fetches schema.json  │
+│     defaults.json                │    │   → renders CzForm       │
+│   adaEMPA/  adaXRD/  ...        │    │   → POSTs JSON-LD        │
+└──────────────────────────────────┘    └──────────┬───────────────┘
+                                                   │ POST /api/metadata/ada/jsonld
+                                        ┌──────────▼───────────────┐
+                                        │ Backend (dspback)        │
+                                        │ translator.py → store    │
+                                        └──────────────────────────┘
+```
+
+Five profiles are supported: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific with enum constraints on `schema:additionalType` and `schema:measurementTechnique`).
+
 ### dspfront — Frontend Application
 
 Vue.js single-page application for browsing repositories, filling metadata forms, and managing submissions.
@@ -105,8 +133,11 @@ Vue.js single-page application for browsing repositories, filling metadata forms
 ```
 dspfront/src/
 ├── components/
-│   ├── submissions/types.ts   # EnumRepositoryKeys, IRepository, ISubmission interfaces
-│   └── submit/constants.ts    # repoMetadata — name, logo, description, URLs per repo
+│   ├── metadata/
+│   │   ├── cz.ada-select-type.vue    # ADA profile selection page (/metadata/ada)
+│   │   └── cz.ada-profile-form.vue   # BB-driven ADA form (/metadata/ada/:profile)
+│   ├── submissions/types.ts          # EnumRepositoryKeys, IRepository, ISubmission interfaces
+│   └── submit/constants.ts           # repoMetadata — name, logo, description, URLs per repo
 ├── models/
 │   ├── repository.model.ts    # Base Vuex ORM model (init, authorize, CRUD, file ops)
 │   ├── ada.model.ts           # ADA repository model
@@ -116,6 +147,7 @@ dspfront/src/
 │   ├── zenodo.model.ts        # Zenodo model
 │   ├── submission.model.ts    # Submission state model
 │   └── user.model.ts          # User/auth state model
+├── routes.ts                  # Vue Router route definitions
 └── constants.ts               # App-wide constants
 ```
 
@@ -169,7 +201,40 @@ Each building block directory contains:
 - `description.md` — Human-readable description
 - `examples.yaml` — (optional) Example snippets with `ref:` pointing to example JSON files
 
-A GitHub Actions workflow (`Validate and process Building Blocks`) runs on every push to validate all building blocks. See `agents.md` for detailed authoring rules.
+A GitHub Actions workflow (`Validate and process Building Blocks`) runs on every push to validate all building blocks. A second workflow (`generate-jsonforms.yml`) runs after BB validation to generate Draft 7 JSON Forms schemas via `tools/convert_for_jsonforms.py`. See `agents.md` for detailed authoring rules.
+
+#### JSON Forms Schema Tools
+
+```
+OCGbuildingBlockTest/tools/
+├── convert_for_jsonforms.py   # Converts Draft 2020-12 → Draft 7, resolves $ref, simplifies anyOf
+├── cors_server.py             # CORS-enabled HTTP server for local development
+└── resolve_schema.py          # Resolves $ref in BB schemas (used by validation workflow)
+```
+
+#### JSON Forms Static Files (hand-crafted)
+
+```
+OCGbuildingBlockTest/_sources/jsonforms/profiles/
+├── adaProduct/
+│   ├── uischema.json    # UI layout (groups, ordering, widgets)
+│   └── defaults.json    # Default values (@context, @type, empty arrays)
+├── adaEMPA/
+├── adaXRD/
+├── adaICPMS/
+└── adaVNMIR/
+```
+
+#### JSON Forms Generated Output
+
+```
+OCGbuildingBlockTest/build/jsonforms/profiles/
+├── adaProduct/schema.json    # Fully resolved Draft 7 schema
+├── adaEMPA/schema.json
+├── adaXRD/schema.json
+├── adaICPMS/schema.json
+└── adaVNMIR/schema.json
+```
 
 #### Vocabulary Namespaces
 

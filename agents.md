@@ -10,7 +10,7 @@ The project is a monorepo with three main components, all included as git submod
 
 | Component | Stack | Submodule | Purpose |
 |---|---|---|---|
-| `dspback/` | FastAPI, MongoDB (Motor/Beanie), Python | `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
+| `dspback/` | FastAPI, PostgreSQL (SQLAlchemy/asyncpg), Python | `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
 | `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | `smrgeoinfo/dspfront` (`develop`) | SPA for forms, submissions, discovery |
 | `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | `smrgeoinfo/OCGbuildingBlockTest` (`master`) | Modular schema components (OGC Building Blocks) |
 
@@ -19,16 +19,16 @@ The project is a monorepo with three main components, all included as git submod
 ```
 User → ORCID Login → Select Repository → Fill Schema-Driven Form → Submit
                                                                       ↓
-                                              MongoDB ← Backend validates & stores
+                                            PostgreSQL ← Backend validates & stores
                                                 ↓
-                                          Atlas Search → Discovery API → Search Results
+                                          Discovery API → Search Results
 ```
 
 ### 1. Authentication (Two Levels)
 
-**User auth:** ORCID OAuth2 → JWT token stored in MongoDB `User` document and cookie.
+**User auth:** ORCID OAuth2 → JWT token stored in PostgreSQL `users` table and cookie.
 
-**Repository auth:** Per-repository OAuth2 (HydroShare, Zenodo, EarthChem). Tokens stored as `RepositoryToken` documents linked to user. ADA and External repos skip this (no OAuth needed).
+**Repository auth:** Per-repository OAuth2 (HydroShare, Zenodo, EarthChem). Tokens stored as `repository_tokens` rows linked to user. ADA and External repos skip this (no OAuth needed).
 
 ### 2. Schema-Driven Forms
 
@@ -44,13 +44,13 @@ The frontend fetches these from `/api/schema/{repo}/` and passes them to the JSO
 
 1. Frontend POSTs form JSON to `/api/metadata/{repo}`
 2. Backend validates against auto-generated Pydantic model (from `schema.json`)
-3. `Record.to_submission()` extracts title, authors, URL into a `Submission` document
-4. Full metadata JSON stored as string in `Submission.metadata_json`
-5. Submission linked to user via `User.submissions` array
+3. `Record.to_submission()` extracts title, authors, URL into a `SubmissionDB` row
+4. Full metadata JSON stored as JSONB in `submissions.metadata`
+5. Submission linked to user via `user_id` foreign key
 
 ### 4. Discovery
 
-MongoDB Atlas Search indexes the `discovery` collection. The `/api/discovery/search` endpoint builds aggregation pipelines with fuzzy matching, faceted filtering (content type, provider, dates, CZO clusters), and pagination.
+The `/api/discovery/search` endpoint provides search across submissions. Discovery functionality has been moved to the separate `dsp-discovery` repository.
 
 ## Key Architecture Patterns
 
@@ -116,7 +116,10 @@ This is the most common extension task. Follow these steps in order:
 | `dspback/dspback/api.py` | FastAPI app setup, router registration, middleware, startup |
 | `dspback/dspback/config/__init__.py` | Settings from `.env`, `repository_config` dict |
 | `dspback/dspback/dependencies.py` | Auth utilities: JWT validation, token refresh, user lookup |
-| `dspback/dspback/pydantic_schemas.py` | `RepositoryType` enum, `User`/`Submission`/`RepositoryToken` Beanie documents, record models |
+| `dspback/dspback/pydantic_schemas.py` | `RepositoryType` enum, Pydantic record models |
+| `dspback/dspback/database/models.py` | SQLAlchemy ORM: `UserDB`, `SubmissionDB`, `RepositoryTokenDB` |
+| `dspback/dspback/database/session.py` | Async engine, `get_session()` FastAPI dependency |
+| `dspback/dspback/database/procedures.py` | DB procedures (INSERT...ON CONFLICT upserts) |
 
 ### Backend Routers
 
@@ -139,6 +142,9 @@ This is the most common extension task. Follow these steps in order:
 | `models/repository.model.ts` | Base Vuex ORM model: init, authorize, CRUD, file ops, `createSubmission` switch |
 | `components/submissions/types.ts` | `EnumRepositoryKeys`, `IRepository`, `ISubmission` interfaces |
 | `components/submit/constants.ts` | `repoMetadata`: names, logos, file limits, feature flags per repo |
+| `components/metadata/cz.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) |
+| `components/metadata/cz.ada-profile-form.vue` | BB-driven ADA form (`/metadata/ada/:profile`) — fetches schema from GitHub Pages |
+| `routes.ts` | Vue Router route definitions |
 
 ### Schema Files
 
@@ -200,6 +206,31 @@ The ADA model is registered in:
 
 The edit form is repository-agnostic: `cz-form` renders whatever JSON Schema + UI Schema the active repository provides. No ADA-specific form code is needed.
 
+### Phase 2: BB-Driven ADA Form Builder
+
+ADA metadata forms are now driven directly by OGC Building Block schemas rather than backend-served JSON. The flow:
+
+1. User selects a profile at `/metadata/ada` (e.g., adaEMPA)
+2. `cz.ada-profile-form.vue` fetches `schema.json`, `uischema.json`, `defaults.json` from GitHub Pages
+3. CzForm renders the form using the fetched schemas
+4. On save, the JSON-LD is POSTed to `/api/metadata/ada/jsonld`
+5. Backend translator converts JSON-LD → flat format, validates, and stores
+
+**Schema pipeline**: `convert_for_jsonforms.py` converts the BB-validated Draft 2020-12 schemas to JSON Forms-compatible Draft 7 by resolving all `$ref`, simplifying `anyOf` patterns, converting `const` → `default`, and merging technique profile `allOf` constraints.
+
+**Five profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`.
+
+**Key files**:
+- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Schema conversion script
+- `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/uischema.json` — Hand-crafted UI layouts
+- `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/defaults.json` — Default values
+- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
+- `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — CI workflow
+- `dspfront/src/components/metadata/cz.ada-profile-form.vue` — Form component
+- `dspfront/src/components/metadata/cz.ada-select-type.vue` — Profile selection
+
+**Local dev**: Run `python tools/cors_server.py` from the `OCGbuildingBlockTest/build/jsonforms` directory to serve schemas on `http://localhost:8090` with CORS headers. The form component's `BB_BASE_URL` must be set to the local server URL during development.
+
 ## Deployment
 
 Three Docker Compose configurations at the repo root:
@@ -212,7 +243,7 @@ Three Docker Compose configurations at the repo root:
 
 Nginx (`nginx/`) reverse proxies `/api/*` to the backend (port 5002) and everything else to the frontend (port 5001). SSL termination happens at nginx.
 
-Environment variables (MongoDB URI, OAuth credentials, JWT secrets) are in `.env` at the repo root.
+Environment variables (PostgreSQL credentials, OAuth credentials, JWT secrets) are in `.env` at the repo root.
 
 ## Vocabulary Namespaces (for OGC Building Blocks)
 
