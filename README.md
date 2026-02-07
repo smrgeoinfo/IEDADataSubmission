@@ -99,28 +99,30 @@ Key mappings:
 
 The existing `POST /api/metadata/ada` endpoint (flat JSON) remains unchanged for the CZ Net frontend forms.
 
-#### Phase 2: BB-Driven ADA Form Builder
+#### Phase 2: Catalog-Driven ADA + CDIF Forms
 
-ADA metadata forms are now driven directly by OGC Building Block schemas rather than the backend-served `schema.json`. The frontend fetches resolved JSON Schema, UISchema, and default values from GitHub Pages (or a local dev server) per profile, renders the form with CzForm (JSON Forms), and POSTs the resulting JSON-LD directly to `/api/metadata/ada/jsonld`. The UISchema uses a `Categorization` root type to organize fields into tabbed sections (Basic Info, Attribution, Methods & Variables, Distribution, Metadata Record).
+ADA and CDIF metadata forms are driven by OGC Building Block schemas served through the Django catalog API. The frontend fetches the resolved schema, UISchema, and default values from `/api/catalog/profiles/{name}/`, renders the form with CzForm (JSON Forms), and saves records to `/api/catalog/records/`. The UISchema uses a `Categorization` root type to organize fields into tabbed sections.
 
 ```
-GitHub Pages (OCGbuildingBlockTest)          Frontend (dspfront)
+Catalog API (dspback-django)              Frontend (dspfront)
 ┌──────────────────────────────────┐    ┌──────────────────────────┐
-│ build/jsonforms/profiles/        │    │ /metadata/ada            │
-│   adaProduct/                    │◄───│   → profile selection    │
-│     schema.json  (Draft 7)       │    │ /metadata/ada/:profile   │
-│     uischema.json                │    │   → fetches schema.json  │
-│     defaults.json                │    │   → renders CzForm       │
-│   adaEMPA/  adaXRD/  ...        │    │   → POSTs JSON-LD        │
-└──────────────────────────────────┘    └──────────┬───────────────┘
-                                                   │ POST /api/metadata/ada/jsonld
-                                        ┌──────────▼───────────────┐
-                                        │ Backend (dspback)        │
-                                        │ translator.py → store    │
-                                        └──────────────────────────┘
+│ GET /api/catalog/profiles/{name}/│◄───│ /metadata/ada            │
+│   → schema, uischema, defaults   │    │   → profile selection    │
+│                                  │    │ /metadata/ada/:profile   │
+│ POST /api/catalog/records/       │◄───│   → fetches profile      │
+│   → validates against schema     │    │   → renders CzForm       │
+│   → extracts title/creators      │    │   → saves to catalog     │
+│                                  │    │ /metadata/cdif           │
+│ GET /api/catalog/records/?mine   │◄───│   → same flow for CDIF   │
+│   → user's catalog records       │    │                          │
+└──────────────────────────────────┘    └──────────────────────────┘
+
+My Submissions page shows both:
+  • Repository Submissions tab → GET /api/submissions (dspback)
+  • Catalog Records tab → GET /api/catalog/records/?mine=true (catalog)
 ```
 
-Five profiles are supported: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific with enum constraints on `schema:additionalType` and `schema:measurementTechnique`).
+Six profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), and `CDIFDiscovery`. The profile list is fetched dynamically from the catalog API.
 
 #### Adding a New ADA Profile
 
@@ -138,11 +140,9 @@ Create `uischema.json` and `defaults.json`. Copy from an existing technique prof
 
 Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list so the conversion script processes it. The generated `schema.json` will appear in `build/jsonforms/profiles/adaXRF/`.
 
-**4. Frontend profile selection** (`dspfront/src/components/metadata/cz.ada-select-type.vue`)
+**4. Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
 
-Add `{ key: 'adaXRF' }` to the `methodProfiles` array (keep alphabetical order).
-
-**5. Frontend form title** (`dspfront/src/components/metadata/cz.ada-profile-form.vue`)
+**5. Frontend form title** (`dspfront/src/components/metadata/geodat.ada-profile-form.vue`)
 
 Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in the `formTitle` getter.
 
@@ -201,7 +201,7 @@ dspback-django/
 |--------|------|-------------|
 | GET | `/api/catalog/profiles/` | List all profiles |
 | GET | `/api/catalog/profiles/{name}/` | Profile detail (schema, uischema, defaults) |
-| GET | `/api/catalog/records/` | List records (filterable by `?profile=`, `?status=`, `?search=`) |
+| GET | `/api/catalog/records/` | List records (filterable by `?profile=`, `?status=`, `?search=`, `?mine=true`) |
 | POST | `/api/catalog/records/` | Create record (validates JSON-LD against profile schema) |
 | GET | `/api/catalog/records/{id}/` | Record detail |
 | PATCH | `/api/catalog/records/{id}/` | Update record (owner only) |
@@ -236,10 +236,15 @@ Vue.js single-page application for browsing repositories, filling metadata forms
 dspfront/src/
 ├── components/
 │   ├── metadata/
-│   │   ├── cz.ada-select-type.vue    # ADA profile selection page (/metadata/ada)
-│   │   └── cz.ada-profile-form.vue   # BB-driven ADA form (/metadata/ada/:profile)
-│   ├── submissions/types.ts          # EnumRepositoryKeys, IRepository, ISubmission interfaces
-│   └── submit/constants.ts           # repoMetadata — name, logo, description, URLs per repo
+│   │   ├── geodat.ada-select-type.vue   # ADA profile selection page (/metadata/ada)
+│   │   ├── geodat.ada-profile-form.vue  # Catalog-driven ADA form (/metadata/ada/:profile)
+│   │   └── geodat.cdif-form.vue         # Catalog-driven CDIF form (/metadata/cdif)
+│   ├── submissions/
+│   │   ├── geodat.submissions.vue       # Submissions page (repo + catalog tabs)
+│   │   └── types.ts                     # EnumRepositoryKeys, IRepository, ISubmission interfaces
+│   └── submit/constants.ts              # repoMetadata — name, logo, description, URLs per repo
+├── services/
+│   └── catalog.ts             # Catalog API helpers (fetchMyRecords, deleteRecord)
 ├── models/
 │   ├── repository.model.ts    # Base Vuex ORM model (init, authorize, CRUD, file ops)
 │   ├── ada.model.ts           # ADA repository model
@@ -340,7 +345,8 @@ OCGbuildingBlockTest/_sources/jsonforms/profiles/
 ├── adaEMPA/
 ├── adaXRD/
 ├── adaICPMS/
-└── adaVNMIR/
+├── adaVNMIR/
+└── CDIFDiscovery/
 ```
 
 #### JSON Forms Generated Output
@@ -351,7 +357,8 @@ OCGbuildingBlockTest/build/jsonforms/profiles/
 ├── adaEMPA/schema.json
 ├── adaXRD/schema.json
 ├── adaICPMS/schema.json
-└── adaVNMIR/schema.json
+├── adaVNMIR/schema.json
+└── CDIFDiscovery/schema.json
 ```
 
 #### Vocabulary Namespaces

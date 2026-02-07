@@ -26,13 +26,15 @@ User → ORCID Login → Select Repository → Fill Schema-Driven Form → Submi
                                                 ↓
                                           Discovery API → Search Results
 
-Catalog flow (new):
-User → ORCID Login → Select Profile → Fill BB-Driven Form → POST JSON-LD
+Catalog flow:
+User → ORCID Login → Select Profile → Fill Catalog-Driven Form → Save
+                                         ↑                          ↓
+               GET /api/catalog/profiles/{name}/       POST /api/catalog/records/
+                  (schema + uischema + defaults)           (validates, extracts fields)
                                                                  ↓
-                                  catalog DB ← Django validates against profile schema
-                                                 & extracts title/creators/identifier
-                                                       ↓
-                                               /api/catalog/records/ → JSON-LD harvesting
+My Submissions → Catalog Records tab → GET /api/catalog/records/?mine=true
+                                         ↓
+                              Edit → ?record={id} query param → PATCH
 ```
 
 ### 1. Authentication (Two Levels)
@@ -155,8 +157,11 @@ This is the most common extension task. Follow these steps in order:
 | `models/repository.model.ts` | Base Vuex ORM model: init, authorize, CRUD, file ops, `createSubmission` switch |
 | `components/submissions/types.ts` | `EnumRepositoryKeys`, `IRepository`, `ISubmission` interfaces |
 | `components/submit/constants.ts` | `repoMetadata`: names, logos, file limits, feature flags per repo |
-| `components/metadata/cz.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) |
-| `components/metadata/cz.ada-profile-form.vue` | BB-driven ADA form (`/metadata/ada/:profile`) — fetches schema from GitHub Pages |
+| `components/metadata/geodat.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) — fetches profiles from catalog API |
+| `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API |
+| `components/metadata/geodat.cdif-form.vue` | Catalog-driven CDIF form (`/metadata/cdif`) — fetches schema from catalog API |
+| `components/submissions/geodat.submissions.vue` | My Submissions page with Repository Submissions + Catalog Records tabs |
+| `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`) |
 | `routes.ts` | Vue Router route definitions |
 
 ### Schema Files
@@ -219,21 +224,26 @@ The ADA model is registered in:
 
 The edit form is repository-agnostic: `cz-form` renders whatever JSON Schema + UI Schema the active repository provides. No ADA-specific form code is needed.
 
-### Phase 2: BB-Driven ADA Form Builder
+### Phase 2: Catalog-Driven ADA + CDIF Forms
 
-ADA metadata forms are now driven directly by OGC Building Block schemas rather than backend-served JSON. The flow:
+ADA and CDIF metadata forms are driven by OGC Building Block schemas served through the Django catalog API. The flow:
 
-1. User selects a profile at `/metadata/ada` (compact list with search filter, general product at top, analytical methods alphabetically below a divider)
-2. `cz.ada-profile-form.vue` fetches `schema.json`, `uischema.json`, `defaults.json` from GitHub Pages
+1. User selects a profile at `/metadata/ada` (compact list with search filter, profiles fetched from `/api/catalog/profiles/`, general product at top, analytical methods alphabetically below a divider)
+2. `geodat.ada-profile-form.vue` fetches schema, uischema, and defaults in a single request to `GET /api/catalog/profiles/{name}/`
 3. The uischema uses `Categorization` type — the form component detects this and renders Vuetify tabs (Basic Info, Attribution, Methods & Variables, Distribution, Metadata Record). Each tab gets its own `CzForm` instance sharing the same data object.
-4. On save, the JSON-LD is POSTed to `/api/metadata/ada/jsonld`
-5. Backend translator converts JSON-LD → flat format, validates, and stores
+4. On save, the record is POSTed to `POST /api/catalog/records/` with `{profile: <id>, jsonld: <data>}`
+5. Catalog backend validates against profile schema, extracts title/creators/identifier, stores record
+6. For editing, `?record=<uuid>` query param loads existing record data; save uses PATCH
+
+The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
+
+**My Submissions page** (`geodat.submissions.vue`) has two tabs: "Repository Submissions" (existing dspback submissions) and "Catalog Records" (fetches from `/api/catalog/records/?mine=true`). Catalog records show title, creators, profile, status, updated date, with Edit/View JSON-LD/Delete actions.
 
 **Important:** CzForm's `renderers` is an internal class field (not a prop), so custom JSON Forms renderers cannot be injected. The Categorization tab handling is done at the parent component level instead.
 
 **Schema pipeline**: `convert_for_jsonforms.py` converts the BB-validated Draft 2020-12 schemas to JSON Forms-compatible Draft 7 by resolving all `$ref`, simplifying `anyOf` patterns, converting `const` → `default`, and merging technique profile `allOf` constraints.
 
-**Five profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`.
+**Six profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`, `CDIFDiscovery` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`.
 
 **Key files**:
 - `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Schema conversion script
@@ -241,10 +251,11 @@ ADA metadata forms are now driven directly by OGC Building Block schemas rather 
 - `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/defaults.json` — Default values
 - `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
 - `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — CI workflow
-- `dspfront/src/components/metadata/cz.ada-profile-form.vue` — Form component
-- `dspfront/src/components/metadata/cz.ada-select-type.vue` — Profile selection
-
-**Local dev**: Run `python tools/cors_server.py` from the `OCGbuildingBlockTest/build/jsonforms` directory to serve schemas on `http://localhost:8090` with CORS headers. The form component's `BB_BASE_URL` must be set to the local server URL during development.
+- `dspfront/src/components/metadata/geodat.ada-profile-form.vue` — ADA form component
+- `dspfront/src/components/metadata/geodat.cdif-form.vue` — CDIF form component
+- `dspfront/src/components/metadata/geodat.ada-select-type.vue` — Profile selection
+- `dspfront/src/components/submissions/geodat.submissions.vue` — Submissions with catalog tab
+- `dspfront/src/services/catalog.ts` — Catalog API helpers
 
 ### Adding a New ADA Profile
 
@@ -253,8 +264,8 @@ To add a new technique profile (e.g., `adaXRF`):
 1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. Copy from an existing technique profile (e.g., `adaEMPA`).
 2. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
 3. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`.
-4. **Frontend profile selection** — Add `{ key: 'adaXRF' }` to the `methodProfiles` array (alphabetically sorted) in `dspfront/src/components/metadata/cz.ada-select-type.vue`.
-5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/cz.ada-profile-form.vue`.
+4. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
+5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
 6. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
 ## Catalog Backend (dspback-django)
@@ -268,12 +279,12 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/catalog/settings.py` | Django settings (DB, auth, DRF, JWT, ORCID, CORS) |
 | `dspback-django/catalog/urls.py` | Root URL config — mounts records and accounts |
 | `dspback-django/accounts/models.py` | Custom User with ORCID as USERNAME_FIELD |
-| `dspback-django/accounts/authentication.py` | JWT auth (Bearer header + ?access_token= query param) |
+| `dspback-django/accounts/authentication.py` | JWT auth (Bearer header + ?access_token= query param, auto-creates users via get_or_create) |
 | `dspback-django/accounts/views.py` | ORCID OAuth login/callback/logout, JWT issuance |
 | `dspback-django/accounts/adapters.py` | allauth adapter populating orcid from social login UID |
 | `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index) |
 | `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction hooks |
-| `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions) |
+| `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter) |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields() from JSON-LD, fetch_jsonld_from_url() |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
@@ -282,7 +293,7 @@ The Django catalog backend provides generic Profile and Record management. Profi
 
 All under `/api/catalog/`:
 - `profiles/` — CRUD for metadata profiles (public read, admin write), lookup by name
-- `records/` — CRUD for JSON-LD records (public read, authenticated create, owner edit/delete)
+- `records/` — CRUD for JSON-LD records (public read, authenticated create, owner edit/delete, `?mine=true` for current user's records)
 - `records/{id}/jsonld/` — Raw JSON-LD export with `application/ld+json` content type
 - `records/import-url/`, `records/import-file/` — Import from URL or file upload
 - `admin/` — Django admin for Profile and Record inspection

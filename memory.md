@@ -78,3 +78,46 @@ Each contains: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`.
 **Setup for existing installs:** The init script only runs on fresh postgres. For existing installs: `docker exec dsp_postgres psql -U dsp -d dsp -c "CREATE DATABASE catalog OWNER dsp;"`, then `docker exec catalog python manage.py migrate` and `docker exec catalog python manage.py load_profiles`.
 
 **Schema validation note:** The OGC BB schemas use Draft-07 (`$schema: http://json-schema.org/draft-07/schema#`). The validator auto-detects the draft version. Draft-07 lacks `unevaluatedProperties`, so strict `allOf` composition (rejecting unknown properties across composed schemas) isn't possible — typos in property names pass validation silently.
+
+## 2026-02-07: Wire Frontend to Catalog API (Milestone 2)
+
+**What changed:** The ADA and CDIF form components now use the Django catalog API (`/api/catalog/`) for schema loading, record saving, and record editing — eliminating the dependency on a local BB CORS dev server and the dspback FastAPI JSON-LD endpoints. The submissions page gained a "Catalog Records" tab showing records saved to the catalog.
+
+**Architecture after this change:**
+```
+Frontend Form  ──→  GET /api/catalog/profiles/{name}/  (schema + uischema + defaults)
+      │
+      └──→  POST /api/catalog/records/  {profile: id, jsonld: {...}}
+                                              │
+                                    catalog validates against schema
+                                    extracts title/creators/identifier
+                                              │
+My Submissions page  ──→  GET /api/catalog/records/?mine=true  (catalog records tab)
+                     ──→  GET /api/submissions                  (dspback submissions tab)
+```
+
+**Schema loading:** Both `geodat.ada-profile-form.vue` and `geodat.cdif-form.vue` now make a single request to `GET /api/catalog/profiles/{name}/` instead of three separate requests to `http://localhost:8090/profiles/{name}/{schema,uischema,defaults}.json`. No local BB CORS dev server needed.
+
+**Save target:** Records are POSTed/PATCHed to `/api/catalog/records/` with `{profile: <id>, jsonld: <data>}` instead of to dspback's `/api/metadata/ada/jsonld` or `/api/metadata/cdif/jsonld`. The catalog backend validates against the profile schema and extracts indexed fields.
+
+**Edit support:** Both forms accept a `?record=<uuid>` query param. When present, the form loads the existing record's JSON-LD from the catalog API and pre-populates the form. Save uses PATCH instead of POST.
+
+**Dynamic profile selection:** `geodat.ada-select-type.vue` fetches the profile list from `GET /api/catalog/profiles/` instead of using a hardcoded array. It separates `adaProduct` (no `base_profile`) from technique profiles (have `base_profile === 'adaProduct'`). Falls back to hardcoded profiles if the API call fails. Display names use i18n with fallback to API `name`.
+
+**Submissions page tabs:** `geodat.submissions.vue` has a tab bar: "Repository Submissions" (existing dspback behavior) and "Catalog Records" (fetches from catalog API with `?mine=true`). Catalog records show title, creators, profile, status chip, and updated date. Actions: Edit (routes to form with `?record=` param), View JSON-LD (opens raw endpoint), Delete (with confirmation dialog).
+
+**Backend changes:**
+- `accounts/authentication.py` — Changed `User.objects.get()` to `get_or_create()` so users from dspback JWT tokens are auto-created in the catalog database
+- `records/views.py` — Added `?mine=true` query param to `RecordViewSet.get_queryset()` filtering records to the authenticated user
+
+**New file:** `dspfront/src/services/catalog.ts` — Helper functions `fetchMyRecords()` and `deleteRecord()` with `CatalogRecord` TypeScript interface.
+
+**File renames (cz. → geodat. prefix):**
+- `cz.ada-profile-form.vue` → `geodat.ada-profile-form.vue`
+- `cz.cdif-form.vue` → `geodat.cdif-form.vue`
+- `cz.ada-select-type.vue` → `geodat.ada-select-type.vue`
+- `cz.submissions.vue` → `geodat.submissions.vue`
+
+Component names, class names, and CSS selectors updated accordingly (e.g., `cz-ada-profile-form` → `geodat-ada-profile-form`). Only these 4 files were renamed; other `cz.` prefixed files remain unchanged.
+
+**What dspback still handles:** HydroShare, EarthChem, Zenodo, and External submissions — these need repository OAuth and file uploads that the catalog backend doesn't provide. The submissions page shows both sources side by side in tabs.
