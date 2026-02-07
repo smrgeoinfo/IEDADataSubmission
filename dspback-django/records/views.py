@@ -1,0 +1,171 @@
+import json
+import uuid
+
+from rest_framework import permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.response import Response
+
+from records.models import Profile, Record
+from records.serializers import (
+    ImportFileSerializer,
+    ImportURLSerializer,
+    ProfileListSerializer,
+    ProfileSerializer,
+    RecordListSerializer,
+    RecordSerializer,
+)
+from records.services import extract_indexed_fields, fetch_jsonld_from_url
+from records.validators import validate_record
+
+
+class IsOwnerOrReadOnly(permissions.BasePermission):
+    """Allow write access only to the record owner."""
+
+    def has_object_permission(self, request, view, obj):
+        if request.method in permissions.SAFE_METHODS:
+            return True
+        return obj.owner == request.user
+
+
+class ProfileViewSet(viewsets.ModelViewSet):
+    """CRUD for metadata profiles. Public read, admin write."""
+
+    queryset = Profile.objects.all()
+    lookup_field = "name"
+    search_fields = ["name", "description"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return ProfileListSerializer
+        return ProfileSerializer
+
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [permissions.IsAdminUser()]
+        return [permissions.AllowAny()]
+
+
+class RecordViewSet(viewsets.ModelViewSet):
+    """CRUD for JSON-LD metadata records."""
+
+    queryset = Record.objects.select_related("profile", "owner").all()
+    search_fields = ["title", "identifier", "creators"]
+    ordering_fields = ["title", "created_at", "updated_at", "status"]
+    filterset_fields = ["profile", "status"]
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return RecordListSerializer
+        return RecordSerializer
+
+    def get_permissions(self):
+        if self.action in ("create", "import_url", "import_file"):
+            return [permissions.IsAuthenticated()]
+        if self.action in ("update", "partial_update", "destroy"):
+            return [permissions.IsAuthenticated(), IsOwnerOrReadOnly()]
+        return [permissions.AllowAny()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+
+        # Filter by profile name
+        profile_name = self.request.query_params.get("profile")
+        if profile_name:
+            qs = qs.filter(profile__name=profile_name)
+
+        # Filter by status
+        record_status = self.request.query_params.get("status")
+        if record_status:
+            qs = qs.filter(status=record_status)
+
+        return qs
+
+    @action(detail=True, methods=["get"], url_path="jsonld")
+    def jsonld(self, request, pk=None):
+        """Return raw JSON-LD with application/ld+json content type."""
+        record = self.get_object()
+        return Response(
+            record.jsonld,
+            content_type="application/ld+json",
+        )
+
+    @action(detail=False, methods=["post"], url_path="import-url")
+    def import_url(self, request):
+        """Import a record from a URL pointing to a JSON-LD document."""
+        serializer = ImportURLSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        url = serializer.validated_data["url"]
+        profile = serializer.validated_data["profile"]
+
+        try:
+            jsonld = fetch_jsonld_from_url(url)
+        except ValueError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Validate against profile schema
+        if profile.schema:
+            errors = validate_record(jsonld, profile.schema)
+            if errors:
+                return Response(
+                    {"jsonld": errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        fields = extract_indexed_fields(jsonld)
+        record = Record.objects.create(
+            profile=profile,
+            jsonld=jsonld,
+            title=fields["title"],
+            creators=fields["creators"],
+            identifier=fields["identifier"] or str(uuid.uuid4()),
+            owner=request.user,
+        )
+
+        return Response(
+            RecordSerializer(record, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="import-file")
+    def import_file(self, request):
+        """Import a record from an uploaded JSON-LD file."""
+        serializer = ImportFileSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        uploaded = serializer.validated_data["file"]
+        profile = serializer.validated_data["profile"]
+
+        try:
+            content = uploaded.read().decode("utf-8")
+            jsonld = json.loads(content)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            return Response(
+                {"error": f"Invalid JSON file: {exc}"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate against profile schema
+        if profile.schema:
+            errors = validate_record(jsonld, profile.schema)
+            if errors:
+                return Response(
+                    {"jsonld": errors},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        fields = extract_indexed_fields(jsonld)
+        record = Record.objects.create(
+            profile=profile,
+            jsonld=jsonld,
+            title=fields["title"],
+            creators=fields["creators"],
+            identifier=fields["identifier"] or str(uuid.uuid4()),
+            owner=request.user,
+        )
+
+        return Response(
+            RecordSerializer(record, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
