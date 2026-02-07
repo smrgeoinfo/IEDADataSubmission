@@ -6,13 +6,16 @@ This document explains what this project is, how it works, and how to navigate t
 
 The IEDA Data Submission Portal (repo: `smrgeoinfo/IEDADataSubmission`) is a web application that lets Earth Science researchers submit, manage, and discover research data across multiple repositories from a single interface. Researchers log in once with their ORCID, fill out standardized metadata forms, and submit to repositories like HydroShare, EarthChem, Zenodo, and ADA (Astromat Data Archive).
 
-The project is a monorepo with three main components, all included as git submodules:
+The project is a monorepo with four main components (three as git submodules, one local):
 
-| Component | Stack | Submodule | Purpose |
+| Component | Stack | Location | Purpose |
 |---|---|---|---|
-| `dspback/` | FastAPI, PostgreSQL (SQLAlchemy/asyncpg), Python | `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
-| `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | `smrgeoinfo/dspfront` (`develop`) | SPA for forms, submissions, discovery |
-| `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | `smrgeoinfo/OCGbuildingBlockTest` (`master`) | Modular schema components (OGC Building Blocks) |
+| `dspback/` | FastAPI, PostgreSQL (SQLAlchemy/asyncpg), Python | Submodule: `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
+| `dspback-django/` | Django 5.1, DRF, SimpleJWT, PostgreSQL | Local directory | Profile-driven metadata catalog API |
+| `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | Submodule: `smrgeoinfo/dspfront` (`develop`) | SPA for forms, submissions, discovery |
+| `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | Submodule: `smrgeoinfo/OCGbuildingBlockTest` (`master`) | Modular schema components (OGC Building Blocks) |
+
+`dspback` and `dspback-django` coexist: nginx routes `/api/catalog/*` to Django (port 5003) and `/api/*` to FastAPI (port 5002). They use separate databases (`catalog` and `dsp`) on the same PostgreSQL instance.
 
 ## How It Works End-to-End
 
@@ -22,6 +25,14 @@ User → ORCID Login → Select Repository → Fill Schema-Driven Form → Submi
                                             PostgreSQL ← Backend validates & stores
                                                 ↓
                                           Discovery API → Search Results
+
+Catalog flow (new):
+User → ORCID Login → Select Profile → Fill BB-Driven Form → POST JSON-LD
+                                                                 ↓
+                                  catalog DB ← Django validates against profile schema
+                                                 & extracts title/creators/identifier
+                                                       ↓
+                                               /api/catalog/records/ → JSON-LD harvesting
 ```
 
 ### 1. Authentication (Two Levels)
@@ -246,6 +257,44 @@ To add a new technique profile (e.g., `adaXRF`):
 5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/cz.ada-profile-form.vue`.
 6. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
+## Catalog Backend (dspback-django)
+
+The Django catalog backend provides generic Profile and Record management. Profiles are loaded from OGC Building Block build output; records store JSON-LD natively with JSON Schema validation.
+
+### Key Files
+
+| File | What It Does |
+|---|---|
+| `dspback-django/catalog/settings.py` | Django settings (DB, auth, DRF, JWT, ORCID, CORS) |
+| `dspback-django/catalog/urls.py` | Root URL config — mounts records and accounts |
+| `dspback-django/accounts/models.py` | Custom User with ORCID as USERNAME_FIELD |
+| `dspback-django/accounts/authentication.py` | JWT auth (Bearer header + ?access_token= query param) |
+| `dspback-django/accounts/views.py` | ORCID OAuth login/callback/logout, JWT issuance |
+| `dspback-django/accounts/adapters.py` | allauth adapter populating orcid from social login UID |
+| `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index) |
+| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction hooks |
+| `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions) |
+| `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
+| `dspback-django/records/services.py` | extract_indexed_fields() from JSON-LD, fetch_jsonld_from_url() |
+| `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
+
+### API Endpoints
+
+All under `/api/catalog/`:
+- `profiles/` — CRUD for metadata profiles (public read, admin write), lookup by name
+- `records/` — CRUD for JSON-LD records (public read, authenticated create, owner edit/delete)
+- `records/{id}/jsonld/` — Raw JSON-LD export with `application/ld+json` content type
+- `records/import-url/`, `records/import-file/` — Import from URL or file upload
+- `admin/` — Django admin for Profile and Record inspection
+
+### Record Lifecycle
+
+1. `POST /api/catalog/records/` with `{profile: <id>, jsonld: {...}}`
+2. Serializer validates JSON-LD against the profile's JSON Schema
+3. `extract_indexed_fields()` pulls title (from `schema:name`), creators (from `schema:creator.@list[].schema:name`), identifier (from `@id` or `schema:identifier`)
+4. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
+5. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
+
 ## Deployment
 
 Three Docker Compose configurations at the repo root:
@@ -256,7 +305,7 @@ Three Docker Compose configurations at the repo root:
 | `docker-compose-upstream.yml` | Full stack built from source |
 | `docker-compose-artifact-registry.yml` | Full stack from pre-built images |
 
-Nginx (`nginx/`) reverse proxies `/api/*` to the backend (port 5002) and everything else to the frontend (port 5001). SSL termination happens at nginx.
+Nginx (`nginx/`) reverse proxies `/api/catalog/*` to the Django catalog backend (port 5003), `/api/*` to FastAPI (port 5002), and everything else to the frontend (port 5001). SSL termination happens at nginx. The `/api/catalog` location block must appear before `/api` in the nginx config for correct routing.
 
 Environment variables (PostgreSQL credentials, OAuth credentials, JWT secrets) are in `.env` at the repo root.
 

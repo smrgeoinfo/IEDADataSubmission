@@ -9,11 +9,13 @@ A web application for submitting, managing, and discovering research data across
 ```
 IEDADataSubmission/
 ├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback, develop)
+├── dspback-django/          # Django catalog backend (profile-driven metadata records)
 ├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront, develop)
 ├── OCGbuildingBlockTest/    # OGC Building Blocks (submodule → smrgeoinfo/OCGbuildingBlockTest, master)
 ├── scrapers/                # Repository metadata scrapers
 ├── jsonld/                  # JSON-LD normalization examples
 ├── nginx/                   # Nginx reverse proxy configs
+├── scripts/                 # Infrastructure scripts (DB init, etc.)
 ├── docker-compose-dev.yml   # Development stack (backend + nginx)
 ├── docker-compose-upstream.yml  # Full stack from source
 ├── docker-compose-artifact-registry.yml  # Full stack from registry
@@ -154,6 +156,71 @@ adaXRF: {
   description: `Metadata for X-ray fluorescence datasets.`,
 },
 ```
+
+### dspback-django — Catalog Backend (Profile-Driven Metadata Records)
+
+Django + DRF backend providing a generic metadata catalog API. Coexists alongside dspback during transition.
+
+- **Framework:** Django 5.1, Django REST Framework, SimpleJWT
+- **Database:** Separate `catalog` PostgreSQL database on same instance
+- **Auth:** ORCID OAuth2 with SimpleJWT tokens (compatible with existing frontend)
+- **Routing:** Nginx routes `/api/catalog/*` to this service (port 5003)
+
+Profiles are loaded from OGC Building Block build output via `python manage.py load_profiles`. Records store JSON-LD natively with JSON Schema validation against the profile's schema.
+
+#### Key Catalog Backend Files
+
+```
+dspback-django/
+├── manage.py
+├── requirements.txt
+├── Dockerfile-dev
+├── catalog/                  # Django project config
+│   ├── settings.py
+│   ├── urls.py
+│   └── wsgi.py
+├── accounts/                 # Auth app
+│   ├── models.py            # Custom User (ORCID as USERNAME_FIELD)
+│   ├── authentication.py    # JWT auth (Bearer header + ?access_token= query param)
+│   ├── views.py             # ORCID OAuth login/callback/logout
+│   └── adapters.py          # django-allauth ORCID adapter
+└── records/                  # Core app
+    ├── models.py            # Profile, Record
+    ├── serializers.py       # DRF serializers with validation hooks
+    ├── views.py             # ProfileViewSet, RecordViewSet
+    ├── validators.py        # JSON Schema validation (Draft-07 / Draft-2020-12)
+    ├── services.py          # JSON-LD field extraction, URL import
+    ├── admin.py             # Django admin registration
+    └── management/commands/
+        └── load_profiles.py # Load profiles from OGC BB build output
+```
+
+#### Catalog API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/catalog/profiles/` | List all profiles |
+| GET | `/api/catalog/profiles/{name}/` | Profile detail (schema, uischema, defaults) |
+| GET | `/api/catalog/records/` | List records (filterable by `?profile=`, `?status=`, `?search=`) |
+| POST | `/api/catalog/records/` | Create record (validates JSON-LD against profile schema) |
+| GET | `/api/catalog/records/{id}/` | Record detail |
+| PATCH | `/api/catalog/records/{id}/` | Update record (owner only) |
+| DELETE | `/api/catalog/records/{id}/` | Delete record (owner only) |
+| GET | `/api/catalog/records/{id}/jsonld/` | Raw JSON-LD (`application/ld+json`) |
+| POST | `/api/catalog/records/import-url/` | Import record from URL |
+| POST | `/api/catalog/records/import-file/` | Import record from file upload |
+
+#### Catalog Setup (Existing Installs)
+
+For existing installs where postgres already has data:
+
+```bash
+docker exec dsp_postgres psql -U dsp -d dsp -c "CREATE DATABASE catalog OWNER dsp;"
+docker exec catalog python manage.py migrate
+docker exec catalog python manage.py load_profiles
+```
+
+Fresh installs handle database creation automatically via `scripts/init-catalog-db.sh`.
 
 ### dspfront — Frontend Application
 
