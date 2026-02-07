@@ -1,9 +1,15 @@
-"""Custom DRF authentication that supports both Bearer header and ?access_token= query param."""
+"""Custom DRF authentication that supports both Bearer header and ?access_token= query param.
 
+Accepts JWTs issued by either dspback (FastAPI, plain jose JWT) or the catalog
+backend (Django SimpleJWT). The dspback tokens lack the ``token_type`` claim
+that SimpleJWT's ``AccessToken`` class requires, so we decode manually using
+PyJWT with the shared signing key.
+"""
+
+import jwt
 from django.conf import settings
 from rest_framework import exceptions
 from rest_framework.authentication import BaseAuthentication
-from rest_framework_simplejwt.tokens import AccessToken
 
 from accounts.models import User
 
@@ -21,12 +27,22 @@ class JWTAuthentication(BaseAuthentication):
         if raw_token is None:
             return None
 
-        try:
-            validated = AccessToken(raw_token)
-        except Exception:
-            raise exceptions.AuthenticationFailed("Invalid or expired token.")
+        jwt_settings = settings.SIMPLE_JWT
+        signing_key = jwt_settings["SIGNING_KEY"]
+        algorithm = jwt_settings.get("ALGORITHM", "HS256")
 
-        orcid = validated.get("sub")
+        try:
+            payload = jwt.decode(
+                raw_token,
+                signing_key,
+                algorithms=[algorithm],
+            )
+        except jwt.ExpiredSignatureError:
+            raise exceptions.AuthenticationFailed("Token has expired.")
+        except jwt.InvalidTokenError:
+            raise exceptions.AuthenticationFailed("Invalid token.")
+
+        orcid = payload.get("sub")
         if not orcid:
             raise exceptions.AuthenticationFailed("Token missing 'sub' claim.")
 
@@ -35,7 +51,7 @@ class JWTAuthentication(BaseAuthentication):
             defaults={"username": orcid},
         )
 
-        return (user, validated)
+        return (user, payload)
 
     def _get_raw_token(self, request):
         # Check Authorization header first

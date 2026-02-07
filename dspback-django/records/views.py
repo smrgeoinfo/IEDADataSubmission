@@ -1,8 +1,12 @@
 import json
+import logging
 import uuid
 
+import requests as http_requests
+from django.conf import settings
+from django.http import JsonResponse
 from rest_framework import permissions, status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 
 from records.models import Profile, Record
@@ -16,6 +20,48 @@ from records.serializers import (
 )
 from records.services import extract_indexed_fields, fetch_jsonld_from_url
 from records.validators import validate_record
+
+logger = logging.getLogger(__name__)
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def me_view(request):
+    """Return authenticated user's profile info (name, ORCID).
+
+    If first_name is missing, attempt to fetch from ORCID public API and cache it.
+    """
+    user = request.user
+
+    # If we don't have the user's name yet, fetch from ORCID public API
+    if not user.first_name and user.orcid:
+        try:
+            orcid_cfg = settings.SOCIALACCOUNT_PROVIDERS.get("orcid", {})
+            base_domain = orcid_cfg.get("BASE_DOMAIN", "orcid.org")
+            # Use pub API (no auth required)
+            resp = http_requests.get(
+                f"https://pub.{base_domain}/v3.0/{user.orcid}/person",
+                headers={"Accept": "application/json"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                person = resp.json()
+                given = person.get("name", {}).get("given-names", {}).get("value", "")
+                family = person.get("name", {}).get("family-name", {}).get("value", "")
+                if given or family:
+                    user.first_name = given
+                    user.last_name = family
+                    user.save(update_fields=["first_name", "last_name"])
+        except Exception:
+            logger.warning("Failed to fetch ORCID profile for %s", user.orcid)
+
+    name = f"{user.first_name} {user.last_name}".strip()
+    return Response({
+        "orcid": user.orcid,
+        "name": name,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+    })
 
 
 class IsOwnerOrReadOnly(permissions.BasePermission):
@@ -89,10 +135,7 @@ class RecordViewSet(viewsets.ModelViewSet):
     def jsonld(self, request, pk=None):
         """Return raw JSON-LD with application/ld+json content type."""
         record = self.get_object()
-        return Response(
-            record.jsonld,
-            content_type="application/ld+json",
-        )
+        return JsonResponse(record.jsonld, content_type="application/ld+json")
 
     @action(detail=False, methods=["post"], url_path="import-url")
     def import_url(self, request):
