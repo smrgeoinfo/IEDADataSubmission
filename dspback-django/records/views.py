@@ -69,6 +69,10 @@ class RecordViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
 
+        # Filter to current user's records when ?mine=true
+        if self.request.query_params.get("mine") == "true" and self.request.user.is_authenticated:
+            qs = qs.filter(owner=self.request.user)
+
         # Filter by profile name
         profile_name = self.request.query_params.get("profile")
         if profile_name:

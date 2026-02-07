@@ -30,10 +30,10 @@ class JWTAuthentication(BaseAuthentication):
         if not orcid:
             raise exceptions.AuthenticationFailed("Token missing 'sub' claim.")
 
-        try:
-            user = User.objects.get(orcid=orcid)
-        except User.DoesNotExist:
-            raise exceptions.AuthenticationFailed("User not found.")
+        user, _ = User.objects.get_or_create(
+            orcid=orcid,
+            defaults={"username": orcid},
+        )
 
         return (user, validated)
 
