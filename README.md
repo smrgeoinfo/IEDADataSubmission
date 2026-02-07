@@ -99,7 +99,7 @@ The existing `POST /api/metadata/ada` endpoint (flat JSON) remains unchanged for
 
 #### Phase 2: BB-Driven ADA Form Builder
 
-ADA metadata forms are now driven directly by OGC Building Block schemas rather than the backend-served `schema.json`. The frontend fetches resolved JSON Schema, UISchema, and default values from GitHub Pages (or a local dev server) per profile, renders the form with CzForm (JSON Forms), and POSTs the resulting JSON-LD directly to `/api/metadata/ada/jsonld`.
+ADA metadata forms are now driven directly by OGC Building Block schemas rather than the backend-served `schema.json`. The frontend fetches resolved JSON Schema, UISchema, and default values from GitHub Pages (or a local dev server) per profile, renders the form with CzForm (JSON Forms), and POSTs the resulting JSON-LD directly to `/api/metadata/ada/jsonld`. The UISchema uses a `Categorization` root type to organize fields into tabbed sections (Basic Info, Attribution, Methods & Variables, Distribution, Metadata Record).
 
 ```
 GitHub Pages (OCGbuildingBlockTest)          Frontend (dspfront)
@@ -138,7 +138,7 @@ Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list so the conversion script process
 
 **4. Frontend profile selection** (`dspfront/src/components/metadata/cz.ada-select-type.vue`)
 
-Add `{ key: 'adaXRF' }` to the `profiles` array.
+Add `{ key: 'adaXRF' }` to the `methodProfiles` array (keep alphabetical order).
 
 **5. Frontend form title** (`dspfront/src/components/metadata/cz.ada-profile-form.vue`)
 

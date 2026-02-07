@@ -212,11 +212,13 @@ The edit form is repository-agnostic: `cz-form` renders whatever JSON Schema + U
 
 ADA metadata forms are now driven directly by OGC Building Block schemas rather than backend-served JSON. The flow:
 
-1. User selects a profile at `/metadata/ada` (e.g., adaEMPA)
+1. User selects a profile at `/metadata/ada` (compact list with search filter, general product at top, analytical methods alphabetically below a divider)
 2. `cz.ada-profile-form.vue` fetches `schema.json`, `uischema.json`, `defaults.json` from GitHub Pages
-3. CzForm renders the form using the fetched schemas
+3. The uischema uses `Categorization` type — the form component detects this and renders Vuetify tabs (Basic Info, Attribution, Methods & Variables, Distribution, Metadata Record). Each tab gets its own `CzForm` instance sharing the same data object.
 4. On save, the JSON-LD is POSTed to `/api/metadata/ada/jsonld`
 5. Backend translator converts JSON-LD → flat format, validates, and stores
+
+**Important:** CzForm's `renderers` is an internal class field (not a prop), so custom JSON Forms renderers cannot be injected. The Categorization tab handling is done at the parent component level instead.
 
 **Schema pipeline**: `convert_for_jsonforms.py` converts the BB-validated Draft 2020-12 schemas to JSON Forms-compatible Draft 7 by resolving all `$ref`, simplifying `anyOf` patterns, converting `const` → `default`, and merging technique profile `allOf` constraints.
 
@@ -240,7 +242,7 @@ To add a new technique profile (e.g., `adaXRF`):
 1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. Copy from an existing technique profile (e.g., `adaEMPA`).
 2. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
 3. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`.
-4. **Frontend profile selection** — Add `{ key: 'adaXRF' }` to the `profiles` array in `dspfront/src/components/metadata/cz.ada-select-type.vue`.
+4. **Frontend profile selection** — Add `{ key: 'adaXRF' }` to the `methodProfiles` array (alphabetically sorted) in `dspfront/src/components/metadata/cz.ada-select-type.vue`.
 5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/cz.ada-profile-form.vue`.
 6. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
