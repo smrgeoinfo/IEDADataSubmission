@@ -161,7 +161,7 @@ This is the most common extension task. Follow these steps in order:
 | `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API |
 | `components/metadata/geodat.cdif-form.vue` | Catalog-driven CDIF form (`/metadata/cdif`) — fetches schema from catalog API |
 | `components/submissions/geodat.submissions.vue` | My Submissions page with Repository Submissions + Catalog Records tabs |
-| `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`) |
+| `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`, `populateOnLoad` with _distributionType init from @type, `populateOnSave`, `populateMaintainer`, `fetchUserInfo`) |
 | `routes.ts` | Vue Router route definitions |
 
 ### Schema Files
@@ -283,12 +283,12 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/accounts/views.py` | ORCID OAuth login/callback/logout, JWT issuance |
 | `dspback-django/accounts/adapters.py` | allauth adapter populating orcid from social login UID |
 | `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index), KnownPerson, KnownOrganization |
-| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction + entity upsert hooks; ProfileSerializer injects vocabulary at serve time |
+| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction + entity upsert hooks; ProfileSerializer injects uischema and schema defaults at serve time; RecordSerializer.validate() strips UI-only fields (_showAdvanced, _distributionType) and sets distribution @type |
 | `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
-| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, injects variable panel progressive disclosure layout |
-| `dspback-django/records/tests.py` | 51 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout |
+| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, MIME type oneOf on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_OPTIONS |
+| `dspback-django/records/tests.py` | 99 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
 | `dspback-django/records/management/commands/backfill_entities.py` | Populates KnownPerson/KnownOrganization from all existing records |
 
@@ -329,10 +329,37 @@ UISchema injection targets: creator (`#/properties/schema:creator/properties/@li
 
 The `schema:variableMeasured` array control's detail layout is injected at serve time with three tiers:
 - **Collapsed:** shows `schema:name` via `elementLabelProp`
-- **Expanded:** `schema:name`, `schema:propertyID`, `schema:description` (multiline) + "Advanced" group button
-- **Advanced (collapsed by default):** `schema:measurementTechnique`, `schema:unitText`+`schema:unitCode`, `schema:minValue`+`schema:maxValue`
+- **Expanded:** `schema:name`, `schema:propertyID`, `schema:description` (multiline), "Show Advanced Options" toggle
+- **Advanced (rule-based):** `schema:measurementTechnique`, `schema:unitText`+`schema:unitCode`, `schema:minValue`+`schema:maxValue`
 
-The Advanced group uses `options.collapsed: true` and `options.expandWhenPopulated: true` (latter needs CzForm GroupRenderer support to auto-open when any advanced field has data).
+The Advanced group uses a JSON Forms SHOW rule with an OR compound condition: visible when `_showAdvanced` is true OR any advanced field has data (each field condition uses `failWhenUndefined: true`). The `_showAdvanced` boolean is injected into the schema at serve time and stripped by the serializer before storage.
+
+### Distribution Detail with Type Selector
+
+The `schema:distribution` array control's detail layout is injected at serve time with conditional fields:
+
+```
+Distribution Type selector (_distributionType: "Data Download" | "Web API")
+├── Always visible: Name, Description
+├── Data Download fields (SHOW when _distributionType == "Data Download"):
+│   ├── Content URL
+│   ├── MIME Type (encodingFormat with oneOf searchable dropdown)
+│   └── Archive Contents (SHOW when Data Download AND encodingFormat contains "application/zip")
+│       └── hasPart items: File Name, Description, MIME Type
+└── Web API fields (SHOW when _distributionType == "Web API"):
+    ├── Service Type
+    └── Documentation URL
+```
+
+Schema injection adds `_distributionType` enum, `schema:serviceType`, and `schema:documentation` properties to distribution items. The serializer strips `_distributionType` and sets `@type` to `["schema:WebAPI"]` or `["schema:DataDownload"]`. Frontend `populateOnLoad()` reverse-maps `@type` → `_distributionType` on form load.
+
+### MIME Type Selectable List
+
+26 MIME types from the `adaFileExtensions` lookup table are hardcoded in `MIME_TYPE_OPTIONS` (sorted alphabetically by media type). Each entry has `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format so CzForm's enum renderer allows searching by extension, type name, or media type. Injected as `oneOf` on `encodingFormat.items` for both distribution and hasPart items.
+
+### Serve-Time Injection Pattern
+
+All form customizations (vocabulary, variable panel, distribution detail, MIME types) use the same pattern: `ProfileSerializer.to_representation()` calls `inject_uischema()` and `inject_schema_defaults()` which modify the schema/uischema deep copies before returning to the frontend. UI-only fields (`_showAdvanced`, `_distributionType`) are injected at serve time and stripped by `RecordSerializer.validate()` before storage. This means no OGC Building Block schema files need editing for form UX changes.
 
 ## Deployment
 

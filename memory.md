@@ -152,7 +152,34 @@ Component names, class names, and CSS selectors updated accordingly (e.g., `cz-a
 
 **Known limitations:**
 - CzForm vocabulary `value` mapping has only been tested with flat strings (Zenodo grants). Nested objects (identifier, affiliation) may need flattening if CzForm doesn't support object values.
-- CzForm GroupRenderer may not support `collapsed` or `expandWhenPopulated` options — group would render expanded until CzForm is enhanced.
 - HydroShare/Zenodo forms use dspback (FastAPI), not the catalog API, so their entities aren't captured yet. Deferred to follow-up.
 
 **Deploy:** `python manage.py migrate`, then `python manage.py backfill_entities`.
+
+## 2026-02-08: Variable Advanced Toggle, Distribution UX, and MIME Type Improvements
+
+**What changed:** Five UX improvements to the ADA form, all implemented via serve-time injection (no schema file edits needed).
+
+**Variable Advanced Toggle:**
+- Replaced the `collapsed`/`expandWhenPopulated` approach (which CzForm's GroupRenderer didn't support) with a `_showAdvanced` boolean checkbox + JSON Forms `rule` with `effect: "SHOW"`.
+- The rule uses an OR compound condition: the Advanced group shows when the toggle is checked OR any advanced field has data (`measurementTechnique`, `unitText`, `unitCode`, `minValue`, `maxValue`). Field conditions use `failWhenUndefined: true` so undefined fields don't trigger the rule.
+- `_showAdvanced` boolean is injected into the variableMeasured items schema at serve time and stripped by the serializer before storage.
+
+**Distribution Type Selector + WebAPI Support:**
+- Distribution detail now has a `_distributionType` enum selector ("Data Download" / "Web API") injected at serve time.
+- Data Download fields (contentUrl, encodingFormat) and WebAPI fields (serviceType, documentation URL) are conditionally shown via SHOW rules keyed to `_distributionType`.
+- Archive Contents (`schema:hasPart`) uses an AND rule: only visible when type is "Data Download" AND `encodingFormat` contains "application/zip".
+- The serializer strips `_distributionType` and sets `@type` to `["schema:WebAPI"]` or `["schema:DataDownload"]` based on the selector value.
+- Frontend `populateOnLoad()` reverse-maps `@type` → `_distributionType` on form load so existing records show the correct selector state.
+
+**MIME Type Selectable List:**
+- 26-entry `MIME_TYPE_OPTIONS` constant with `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format. Sorted alphabetically by media type. Derived from the `adaFileExtensions` lookup table.
+- Injected as `oneOf` on `schema:encodingFormat.items` for both distribution items and hasPart items (files within archives). CzForm renders `oneOf` on primitive strings as a searchable dropdown.
+
+**Key finding:** JSON Forms rules work on Groups, not just Controls. `@jsonforms/core` supports `rule.effect: "SHOW"/"HIDE"` on any UISchema element (Controls, Groups, Layouts), with `OR`/`AND` compound conditions and `SchemaBasedCondition` with `failWhenUndefined`.
+
+**Files changed:**
+- `dspback-django/records/uischema_injection.py` — MIME_TYPE_OPTIONS, DISTRIBUTION_DETAIL, HAS_PART_DETAIL, DISTRIBUTION_SCOPES, updated VARIABLE_DETAIL with rule, expanded inject_schema_defaults and inject_uischema
+- `dspback-django/records/serializers.py` — Cleanup logic in validate() for _showAdvanced and _distributionType
+- `dspfront/src/services/catalog.ts` — _distributionType initialization in populateOnLoad()
+- `dspback-django/records/tests.py` — 30+ new tests (99 total, up from 51)
