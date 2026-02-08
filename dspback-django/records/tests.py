@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from records.models import KnownOrganization, KnownPerson, Profile, Record
 from records.services import extract_known_entities, upsert_known_entities
 from records.uischema_injection import (
+    MIME_TYPE_ENUM,
     MIME_TYPE_OPTIONS,
     inject_schema_defaults,
     inject_uischema,
@@ -811,19 +812,19 @@ class SchemaDefaultsInjectionTest(TestCase):
         self.assertIn("schema:documentation", dist_props)
         self.assertEqual(dist_props["schema:documentation"]["format"], "uri")
 
-    def test_injects_mime_type_one_of_on_encoding_format(self):
+    def test_injects_mime_type_enum_on_encoding_format(self):
         result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
         dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
         enc_items = dist_props["schema:encodingFormat"]["items"]
-        self.assertIn("oneOf", enc_items)
-        self.assertEqual(enc_items["oneOf"], MIME_TYPE_OPTIONS)
+        self.assertIn("enum", enc_items)
+        self.assertEqual(enc_items["enum"], MIME_TYPE_ENUM)
 
-    def test_injects_mime_type_one_of_on_has_part_encoding_format(self):
+    def test_injects_mime_type_enum_on_has_part_encoding_format(self):
         result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
         dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
         hp_enc_items = dist_props["schema:hasPart"]["items"]["properties"]["schema:encodingFormat"]["items"]
-        self.assertIn("oneOf", hp_enc_items)
-        self.assertEqual(hp_enc_items["oneOf"], MIME_TYPE_OPTIONS)
+        self.assertIn("enum", hp_enc_items)
+        self.assertEqual(hp_enc_items["enum"], MIME_TYPE_ENUM)
 
     def test_schema_without_distribution_unchanged(self):
         """Distribution injection skips schemas without schema:distribution."""

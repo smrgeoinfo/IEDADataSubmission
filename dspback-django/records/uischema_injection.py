@@ -83,6 +83,11 @@ MIME_TYPE_OPTIONS = [
     {"const": "video/quicktime", "title": ".mov - QuickTime Video (video/quicktime)"},
 ]
 
+# Flat enum list of media type strings for schema injection.
+# CzForm doesn't render oneOf on primitive strings as a searchable dropdown,
+# so we use enum instead.  MIME_TYPE_OPTIONS is kept for reference/tests.
+MIME_TYPE_ENUM = [opt["const"] for opt in MIME_TYPE_OPTIONS]
+
 # ---------------------------------------------------------------------------
 # Variable panel progressive disclosure
 # ---------------------------------------------------------------------------
@@ -357,7 +362,7 @@ def inject_schema_defaults(schema):
 
     - variableMeasured items: @type default, _showAdvanced boolean
     - distribution items: _distributionType enum, WebAPI properties
-    - encodingFormat: oneOf for MIME type selection
+    - encodingFormat: enum for MIME type selection
     """
     result = copy.deepcopy(schema)
 
@@ -392,14 +397,14 @@ def inject_schema_defaults(schema):
         dist_props.setdefault("schema:serviceType", {"type": "string"})
         dist_props.setdefault("schema:documentation", {"type": "string", "format": "uri"})
 
-        # MIME type oneOf on distribution encodingFormat
+        # MIME type enum on distribution encodingFormat
         enc_fmt = dist_props.get("schema:encodingFormat", {})
         if isinstance(enc_fmt, dict) and enc_fmt.get("type") == "array":
             enc_fmt_items = enc_fmt.get("items", {})
             if isinstance(enc_fmt_items, dict):
-                enc_fmt_items["oneOf"] = MIME_TYPE_OPTIONS
+                enc_fmt_items["enum"] = MIME_TYPE_ENUM
 
-        # MIME type oneOf on hasPart items' encodingFormat
+        # MIME type enum on hasPart items' encodingFormat
         has_part = dist_props.get("schema:hasPart", {})
         hp_items = has_part.get("items", {})
         hp_props = hp_items.get("properties", {})
@@ -407,7 +412,7 @@ def inject_schema_defaults(schema):
         if isinstance(hp_enc_fmt, dict) and hp_enc_fmt.get("type") == "array":
             hp_enc_items = hp_enc_fmt.get("items", {})
             if isinstance(hp_enc_items, dict):
-                hp_enc_items["oneOf"] = MIME_TYPE_OPTIONS
+                hp_enc_items["enum"] = MIME_TYPE_ENUM
 
     return result
 
