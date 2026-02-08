@@ -166,7 +166,7 @@ Django + DRF backend providing a generic metadata catalog API. Coexists alongsid
 - **Auth:** ORCID OAuth2 with SimpleJWT tokens (compatible with existing frontend)
 - **Routing:** Nginx routes `/api/catalog/*` to this service (port 5003)
 
-Profiles are loaded from OGC Building Block build output via `python manage.py load_profiles`. Records store JSON-LD natively with JSON Schema validation against the profile's schema.
+Profiles are loaded from OGC Building Block build output via `python manage.py load_profiles`. Records store JSON-LD natively with JSON Schema validation against the profile's schema. Person and organization entities are accumulated from saved records into `KnownPerson`/`KnownOrganization` tables, providing autocomplete pick lists via search endpoints. UISchema vocabulary configs and variable panel layouts are injected at serve time.
 
 #### Key Catalog Backend Files
 
@@ -177,6 +177,7 @@ dspback-django/
 ├── Dockerfile-dev
 ├── catalog/                  # Django project config
 │   ├── settings.py
+│   ├── test_settings.py     # SQLite settings for tests
 │   ├── urls.py
 │   └── wsgi.py
 ├── accounts/                 # Auth app
@@ -185,14 +186,17 @@ dspback-django/
 │   ├── views.py             # ORCID OAuth login/callback/logout
 │   └── adapters.py          # django-allauth ORCID adapter
 └── records/                  # Core app
-    ├── models.py            # Profile, Record
-    ├── serializers.py       # DRF serializers with validation hooks
-    ├── views.py             # ProfileViewSet, RecordViewSet
+    ├── models.py            # Profile, Record, KnownPerson, KnownOrganization
+    ├── serializers.py       # DRF serializers with validation hooks + vocabulary injection
+    ├── views.py             # ProfileViewSet, RecordViewSet, persons/orgs search
     ├── validators.py        # JSON Schema validation (Draft-07 / Draft-2020-12)
-    ├── services.py          # JSON-LD field extraction, URL import
+    ├── services.py          # JSON-LD field extraction, entity upsert, URL import
+    ├── uischema_injection.py # UISchema tree walker (vocabulary + variable panel layout)
     ├── admin.py             # Django admin registration
+    ├── tests.py             # 51 tests for pick lists + variable panel
     └── management/commands/
-        └── load_profiles.py # Load profiles from OGC BB build output
+        ├── load_profiles.py      # Load profiles from OGC BB build output
+        └── backfill_entities.py  # Populate KnownPerson/KnownOrganization from existing records
 ```
 
 #### Catalog API Endpoints
@@ -209,6 +213,8 @@ dspback-django/
 | GET | `/api/catalog/records/{id}/jsonld/` | Raw JSON-LD (`application/ld+json`) |
 | POST | `/api/catalog/records/import-url/` | Import record from URL |
 | POST | `/api/catalog/records/import-file/` | Import record from file upload |
+| GET | `/api/catalog/persons/?q=` | Search known persons (autocomplete pick list) |
+| GET | `/api/catalog/organizations/?q=` | Search known organizations (autocomplete pick list) |
 
 #### Catalog Setup (Existing Installs)
 

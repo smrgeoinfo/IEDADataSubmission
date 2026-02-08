@@ -282,12 +282,15 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/accounts/authentication.py` | JWT auth (Bearer header + ?access_token= query param, auto-creates users via get_or_create) |
 | `dspback-django/accounts/views.py` | ORCID OAuth login/callback/logout, JWT issuance |
 | `dspback-django/accounts/adapters.py` | allauth adapter populating orcid from social login UID |
-| `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index) |
-| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction hooks |
-| `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter) |
+| `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index), KnownPerson, KnownOrganization |
+| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction + entity upsert hooks; ProfileSerializer injects vocabulary at serve time |
+| `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
-| `dspback-django/records/services.py` | extract_indexed_fields() from JSON-LD, fetch_jsonld_from_url() |
+| `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
+| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, injects variable panel progressive disclosure layout |
+| `dspback-django/records/tests.py` | 51 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
+| `dspback-django/records/management/commands/backfill_entities.py` | Populates KnownPerson/KnownOrganization from all existing records |
 
 ### API Endpoints
 
@@ -296,15 +299,40 @@ All under `/api/catalog/`:
 - `records/` — CRUD for JSON-LD records (public read, authenticated create, owner edit/delete, `?mine=true` for current user's records)
 - `records/{id}/jsonld/` — Raw JSON-LD export with `application/ld+json` content type
 - `records/import-url/`, `records/import-file/` — Import from URL or file upload
-- `admin/` — Django admin for Profile and Record inspection
+- `persons/?q=` — Search accumulated person entities by name (public, returns schema.org-shaped JSON with identifier/affiliation)
+- `organizations/?q=` — Search accumulated organization entities by name (public, returns schema.org-shaped JSON with identifier)
+- `admin/` — Django admin for Profile, Record, KnownPerson, KnownOrganization inspection
 
 ### Record Lifecycle
 
 1. `POST /api/catalog/records/` with `{profile: <id>, jsonld: {...}}`
 2. Serializer validates JSON-LD against the profile's JSON Schema
 3. `extract_indexed_fields()` pulls title (from `schema:name`), creators (from `schema:creator.@list[].schema:name`), identifier (from `@id` or `schema:identifier`)
-4. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
-5. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
+4. `upsert_known_entities()` extracts persons/orgs from JSON-LD and upserts into KnownPerson/KnownOrganization tables (same on create, update, import-url, import-file)
+5. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
+6. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
+
+### Person/Org Pick Lists (Autocomplete)
+
+```
+Record saved  ──→  extract persons/orgs from JSON-LD  ──→  upsert KnownPerson / KnownOrganization
+Profile served  ──→  ProfileSerializer.to_representation()  ──→  inject vocabulary config into UISchema
+Form loads  ──→  CzForm sees vocabulary on creator/contributor controls  ──→  autocomplete from API
+User types  ──→  GET /api/catalog/persons/?q=Joe  ──→  CzForm populates name + identifier + affiliation
+```
+
+Entity extraction walks: `schema:creator.@list[]`, `schema:contributor[]`, `schema:subjectOf.schema:maintainer`, `schema:publisher`, `schema:provider[]`, and nested `schema:affiliation`. Unique constraint on `(name, identifier_value)` — same name with different ORCID/ROR creates separate entries.
+
+UISchema injection targets: creator (`#/properties/schema:creator/properties/@list`), contributor (`#/properties/schema:contributor`), maintainer (`#/properties/schema:subjectOf/properties/schema:maintainer`), provider (`#/properties/schema:provider`), publisher name (`#/properties/schema:publisher/properties/schema:name`).
+
+### Variable Panel Progressive Disclosure
+
+The `schema:variableMeasured` array control's detail layout is injected at serve time with three tiers:
+- **Collapsed:** shows `schema:name` via `elementLabelProp`
+- **Expanded:** `schema:name`, `schema:propertyID`, `schema:description` (multiline) + "Advanced" group button
+- **Advanced (collapsed by default):** `schema:measurementTechnique`, `schema:unitText`+`schema:unitCode`, `schema:minValue`+`schema:maxValue`
+
+The Advanced group uses `options.collapsed: true` and `options.expandWhenPopulated: true` (latter needs CzForm GroupRenderer support to auto-open when any advanced field has data).
 
 ## Deployment
 

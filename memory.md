@@ -121,3 +121,38 @@ My Submissions page  ──→  GET /api/catalog/records/?mine=true  (catalog re
 Component names, class names, and CSS selectors updated accordingly (e.g., `cz-ada-profile-form` → `geodat-ada-profile-form`). Only these 4 files were renamed; other `cz.` prefixed files remain unchanged.
 
 **What dspback still handles:** HydroShare, EarthChem, Zenodo, and External submissions — these need repository OAuth and file uploads that the catalog backend doesn't provide. The submissions page shows both sources side by side in tabs.
+
+## 2026-02-07: Person/Org Pick Lists and Variable Panel Progressive Disclosure
+
+**What changed:** Added autocomplete pick lists for person and organization fields, and a progressive disclosure layout for the variableMeasured panel.
+
+**Person/Org Pick Lists:**
+- New `KnownPerson` and `KnownOrganization` models accumulate entities extracted from saved records. Unique constraint on `(name, identifier_value)` so same name with different ORCID/ROR creates separate entries.
+- `extract_known_entities()` walks JSON-LD paths: `schema:creator.@list[]`, `schema:contributor[]`, `schema:subjectOf.schema:maintainer`, `schema:publisher`, `schema:provider[]`, and nested `schema:affiliation` objects. `upsert_known_entities()` does `update_or_create` for each.
+- Upsert called on record create, update, import-url, and import-file.
+- Search endpoints: `GET /api/catalog/persons/?q=` and `GET /api/catalog/organizations/?q=` return schema.org-shaped JSON (with `schema:name`, `schema:identifier`, `schema:affiliation` objects) for direct mapping into CzForm fields.
+- UISchema injection at serve time: `ProfileSerializer.to_representation()` calls `inject_vocabulary()` which walks the UISchema tree and adds CzForm `vocabulary` options on creator, contributor, maintainer, provider, and publisher controls.
+- `backfill_entities` management command scans all existing records to populate the tables.
+
+**Variable Panel Progressive Disclosure:**
+- UISchema injection also replaces the `schema:variableMeasured` control's `options.detail` with a three-tier layout:
+  - Collapsed: shows `schema:name` via `elementLabelProp`
+  - Expanded: `schema:name`, `schema:propertyID`, `schema:description` (multiline) + "Advanced" group
+  - Advanced group (collapsed by default): `schema:measurementTechnique`, `schema:unitText`+`schema:unitCode` (horizontal), `schema:minValue`+`schema:maxValue` (horizontal)
+- Advanced group has `options.collapsed: true` and `options.expandWhenPopulated: true` (latter requires CzForm GroupRenderer support).
+
+**New files:**
+- `records/uischema_injection.py` — UISchema tree walker for vocabulary and variable panel injection
+- `records/management/commands/backfill_entities.py` — Backfill command
+- `records/migrations/0002_knownorganization_knownperson.py` — Migration
+- `records/tests.py` — 51 tests (entity extraction, upsert, search API, vocabulary injection, variable panel layout)
+- `catalog/test_settings.py` — SQLite settings for running tests without PostgreSQL
+
+**API endpoints added:** `GET /api/catalog/persons/?q=`, `GET /api/catalog/organizations/?q=` (public, no auth)
+
+**Known limitations:**
+- CzForm vocabulary `value` mapping has only been tested with flat strings (Zenodo grants). Nested objects (identifier, affiliation) may need flattening if CzForm doesn't support object values.
+- CzForm GroupRenderer may not support `collapsed` or `expandWhenPopulated` options — group would render expanded until CzForm is enhanced.
+- HydroShare/Zenodo forms use dspback (FastAPI), not the catalog API, so their entities aren't captured yet. Deferred to follow-up.
+
+**Deploy:** `python manage.py migrate`, then `python manage.py backfill_entities`.
