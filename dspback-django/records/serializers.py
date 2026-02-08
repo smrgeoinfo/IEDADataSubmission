@@ -4,7 +4,7 @@ from rest_framework import serializers
 
 from records.models import Profile, Record
 from records.services import extract_indexed_fields, upsert_known_entities
-from records.uischema_injection import inject_vocabulary
+from records.uischema_injection import inject_schema_defaults, inject_uischema
 from records.validators import validate_record
 
 
@@ -35,7 +35,9 @@ class ProfileSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         data = super().to_representation(instance)
         if data.get("uischema"):
-            data["uischema"] = inject_vocabulary(data["uischema"])
+            data["uischema"] = inject_uischema(data["uischema"])
+        if data.get("schema"):
+            data["schema"] = inject_schema_defaults(data["schema"])
         return data
 
 
@@ -98,6 +100,22 @@ class RecordSerializer(serializers.ModelSerializer):
                 profile = self.instance.profile
             else:
                 raise serializers.ValidationError({"profile": "This field is required."})
+
+        # Strip UI-only fields before validation and storage
+        if jsonld:
+            # Clean _showAdvanced from variableMeasured items
+            for var in jsonld.get("schema:variableMeasured", []):
+                if isinstance(var, dict):
+                    var.pop("_showAdvanced", None)
+
+            # Clean _distributionType from distribution items and set @type
+            for dist in jsonld.get("schema:distribution", []):
+                if isinstance(dist, dict):
+                    dt = dist.pop("_distributionType", None)
+                    if dt == "Web API":
+                        dist["@type"] = ["schema:WebAPI"]
+                    elif dt == "Data Download" or dt is None:
+                        dist.setdefault("@type", ["schema:DataDownload"])
 
         if jsonld and profile.schema:
             errors = validate_record(jsonld, profile.schema)

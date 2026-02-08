@@ -1,6 +1,8 @@
-"""Tests for person/org pick lists and variable panel UISchema injection."""
+"""Tests for person/org pick lists, variable panel, distribution, MIME types, and schema defaults injection."""
 
 import json
+import unittest
+from unittest import mock
 
 from django.contrib.auth import get_user_model
 from django.db import connection
@@ -9,7 +11,11 @@ from rest_framework.test import APIClient
 
 from records.models import KnownOrganization, KnownPerson, Profile, Record
 from records.services import extract_known_entities, upsert_known_entities
-from records.uischema_injection import inject_vocabulary
+from records.uischema_injection import (
+    MIME_TYPE_OPTIONS,
+    inject_schema_defaults,
+    inject_uischema,
+)
 
 User = get_user_model()
 
@@ -143,6 +149,17 @@ SAMPLE_UISCHEMA = {
                 }
             ],
         },
+        {
+            "type": "Group",
+            "label": "Distribution",
+            "elements": [
+                {
+                    "type": "Control",
+                    "scope": "#/properties/schema:distribution",
+                    "label": "Distributions",
+                }
+            ],
+        },
     ],
 }
 
@@ -150,6 +167,67 @@ SIMPLE_SCHEMA = {
     "type": "object",
     "properties": {
         "schema:name": {"type": "string"},
+    },
+}
+
+# Schema that mimics the real variableMeasured structure
+VARIABLE_MEASURED_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema:name": {"type": "string"},
+        "schema:variableMeasured": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "@type": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "schema:name": {"type": "string"},
+                },
+                "required": ["@type", "schema:name"],
+            },
+        },
+    },
+}
+
+
+# Schema that mimics the real distribution structure
+DISTRIBUTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "schema:name": {"type": "string"},
+        "schema:distribution": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "@type": {"type": "array", "items": {"type": "string"}},
+                    "schema:name": {"type": "string"},
+                    "schema:description": {"type": "string"},
+                    "schema:contentUrl": {"type": "string", "format": "uri"},
+                    "schema:encodingFormat": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "schema:hasPart": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "schema:name": {"type": "string"},
+                                "schema:description": {"type": "string"},
+                                "schema:encodingFormat": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
     },
 }
 
@@ -447,46 +525,71 @@ class OrganizationsSearchAPITest(TestCase):
 # ===================================================================
 
 
-class VocabularyInjectionTest(TestCase):
+class VocabularyInjectionDisabledTest(TestCase):
+    """With VOCABULARY_ENABLED=False (default), no vocabulary is injected."""
+
+    def test_creator_no_vocabulary(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        creator = result["elements"][0]
+        self.assertNotIn("vocabulary", creator.get("options", {}))
+
+    def test_contributor_no_vocabulary(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        contrib = result["elements"][1]
+        self.assertNotIn("vocabulary", contrib.get("options", {}))
+
+    def test_provider_no_vocabulary(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        provider = result["elements"][3]
+        self.assertNotIn("vocabulary", provider.get("options", {}))
+
+    def test_publisher_name_no_vocabulary(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        pub_name = result["elements"][4]
+        self.assertNotIn("vocabulary", pub_name.get("options", {}))
+
+
+class VocabularyInjectionEnabledTest(TestCase):
+    """With VOCABULARY_ENABLED=True, vocabulary is injected on person/org controls."""
+
+    def _inject_with_vocab_enabled(self, uischema):
+        with mock.patch("records.uischema_injection.VOCABULARY_ENABLED", True):
+            return inject_uischema(uischema)
+
     def test_creator_gets_vocabulary(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         creator = result["elements"][0]
         self.assertIn("vocabulary", creator["options"])
         vocab = creator["options"]["vocabulary"]
         self.assertEqual(vocab["jsonUrl"], "/api/catalog/persons/")
 
     def test_contributor_gets_vocabulary(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         contrib = result["elements"][1]
         self.assertIn("vocabulary", contrib["options"])
         self.assertEqual(contrib["options"]["vocabulary"]["jsonUrl"], "/api/catalog/persons/")
 
     def test_maintainer_nested_in_group_gets_vocabulary(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         group = result["elements"][2]
         maintainer = group["elements"][0]
         self.assertIn("vocabulary", maintainer["options"])
         self.assertEqual(maintainer["options"]["vocabulary"]["jsonUrl"], "/api/catalog/persons/")
 
     def test_provider_gets_org_vocabulary(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         provider = result["elements"][3]
         self.assertIn("vocabulary", provider["options"])
         self.assertEqual(provider["options"]["vocabulary"]["jsonUrl"], "/api/catalog/organizations/")
 
     def test_publisher_name_gets_org_vocabulary(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         pub_name = result["elements"][4]
         self.assertIn("vocabulary", pub_name["options"])
         self.assertEqual(pub_name["options"]["vocabulary"]["jsonUrl"], "/api/catalog/organizations/")
 
-    def test_does_not_mutate_original(self):
-        original_copy = json.loads(json.dumps(SAMPLE_UISCHEMA))
-        inject_vocabulary(SAMPLE_UISCHEMA)
-        self.assertEqual(SAMPLE_UISCHEMA, original_copy)
-
     def test_person_vocabulary_value_mapping(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = self._inject_with_vocab_enabled(SAMPLE_UISCHEMA)
         vocab = result["elements"][0]["options"]["vocabulary"]
         self.assertIn("schema:name", vocab["value"])
         self.assertIn("schema:identifier", vocab["value"])
@@ -495,52 +598,80 @@ class VocabularyInjectionTest(TestCase):
 
 
 class VariablePanelInjectionTest(TestCase):
-    def test_variable_detail_replaced(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+    def _get_variable_detail(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
         var_group = result["elements"][5]
         var_ctrl = var_group["elements"][0]
-        detail = var_ctrl["options"]["detail"]
+        return var_ctrl["options"]["detail"]
+
+    def test_variable_detail_replaced(self):
+        detail = self._get_variable_detail()
         self.assertEqual(detail["type"], "VerticalLayout")
-        self.assertEqual(len(detail["elements"]), 4)
+        # name, propertyID, description, _showAdvanced toggle, Advanced group
+        self.assertEqual(len(detail["elements"]), 5)
 
     def test_variable_basic_fields(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
-        detail = result["elements"][5]["elements"][0]["options"]["detail"]
+        detail = self._get_variable_detail()
         labels = [el.get("label") for el in detail["elements"][:3]]
         self.assertEqual(labels, ["Name", "Property ID", "Description"])
 
-    def test_variable_advanced_group(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
-        detail = result["elements"][5]["elements"][0]["options"]["detail"]
-        advanced = detail["elements"][3]
+    def test_variable_show_advanced_toggle(self):
+        detail = self._get_variable_detail()
+        toggle = detail["elements"][3]
+        self.assertEqual(toggle["type"], "Control")
+        self.assertEqual(toggle["scope"], "#/properties/_showAdvanced")
+        self.assertEqual(toggle["label"], "Show Advanced Options")
+
+    def test_variable_advanced_group_has_rule(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
         self.assertEqual(advanced["type"], "Group")
         self.assertEqual(advanced["label"], "Advanced")
-        self.assertTrue(advanced["options"]["collapsed"])
-        self.assertTrue(advanced["options"]["expandWhenPopulated"])
+        self.assertIn("rule", advanced)
+        self.assertEqual(advanced["rule"]["effect"], "SHOW")
+
+    def test_variable_advanced_rule_is_or_condition(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        condition = advanced["rule"]["condition"]
+        self.assertEqual(condition["type"], "OR")
+        # _showAdvanced + 5 field conditions
+        self.assertEqual(len(condition["conditions"]), 6)
+
+    def test_variable_advanced_rule_toggle_condition(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        toggle_cond = advanced["rule"]["condition"]["conditions"][0]
+        self.assertEqual(toggle_cond["scope"], "#/properties/_showAdvanced")
+        self.assertEqual(toggle_cond["schema"], {"const": True})
+
+    def test_variable_advanced_rule_field_conditions_use_fail_when_undefined(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        field_conditions = advanced["rule"]["condition"]["conditions"][1:]
+        for cond in field_conditions:
+            self.assertTrue(cond.get("failWhenUndefined"), f"Missing failWhenUndefined on {cond['scope']}")
 
     def test_variable_advanced_fields(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
-        detail = result["elements"][5]["elements"][0]["options"]["detail"]
-        advanced = detail["elements"][3]
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
         # measurementTechnique + 2 HorizontalLayouts
         self.assertEqual(len(advanced["elements"]), 3)
         self.assertEqual(advanced["elements"][0]["label"], "Measurement Technique")
 
     def test_variable_element_label_prop(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
+        result = inject_uischema(SAMPLE_UISCHEMA)
         var_ctrl = result["elements"][5]["elements"][0]
         self.assertEqual(var_ctrl["options"]["elementLabelProp"], "schema:name")
 
     def test_description_is_multiline(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
-        detail = result["elements"][5]["elements"][0]["options"]["detail"]
+        detail = self._get_variable_detail()
         desc = detail["elements"][2]
         self.assertTrue(desc["options"]["multi"])
 
     def test_advanced_horizontal_layouts(self):
-        result = inject_vocabulary(SAMPLE_UISCHEMA)
-        detail = result["elements"][5]["elements"][0]["options"]["detail"]
-        advanced = detail["elements"][3]
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
         # unitText + unitCode horizontal
         h1 = advanced["elements"][1]
         self.assertEqual(h1["type"], "HorizontalLayout")
@@ -552,6 +683,153 @@ class VariablePanelInjectionTest(TestCase):
         self.assertEqual(h2["elements"][0]["label"], "Min Value")
         self.assertEqual(h2["elements"][1]["label"], "Max Value")
 
+    def test_does_not_mutate_original(self):
+        original_copy = json.loads(json.dumps(SAMPLE_UISCHEMA))
+        inject_uischema(SAMPLE_UISCHEMA)
+        self.assertEqual(SAMPLE_UISCHEMA, original_copy)
+
+
+class DefinedTermDetailTest(TestCase):
+    """Test that DefinedTerm controls hide @type via explicit detail layouts."""
+
+    def _get_variable_detail(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        return result["elements"][5]["elements"][0]["options"]["detail"]
+
+    def test_property_id_has_detail_layout(self):
+        detail = self._get_variable_detail()
+        prop_id = detail["elements"][1]  # Property ID control
+        self.assertIn("detail", prop_id.get("options", {}))
+
+    def test_property_id_detail_excludes_at_type(self):
+        detail = self._get_variable_detail()
+        prop_id_detail = detail["elements"][1]["options"]["detail"]
+        scopes = [el["scope"] for el in prop_id_detail["elements"]]
+        self.assertNotIn("#/properties/@type", scopes)
+
+    def test_property_id_detail_includes_defined_term_fields(self):
+        detail = self._get_variable_detail()
+        prop_id_detail = detail["elements"][1]["options"]["detail"]
+        scopes = [el["scope"] for el in prop_id_detail["elements"]]
+        self.assertIn("#/properties/schema:name", scopes)
+        self.assertIn("#/properties/schema:identifier", scopes)
+        self.assertIn("#/properties/schema:inDefinedTermSet", scopes)
+        self.assertIn("#/properties/schema:termCode", scopes)
+
+    def test_measurement_technique_has_detail_layout(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        mt = advanced["elements"][0]  # Measurement Technique control
+        self.assertIn("detail", mt.get("options", {}))
+
+    def test_measurement_technique_detail_shows_only_name(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        mt_detail = advanced["elements"][0]["options"]["detail"]
+        self.assertEqual(len(mt_detail["elements"]), 1)
+        self.assertEqual(mt_detail["elements"][0]["scope"], "#/properties/schema:name")
+
+    def test_measurement_technique_detail_excludes_at_type(self):
+        detail = self._get_variable_detail()
+        advanced = detail["elements"][4]
+        mt_detail = advanced["elements"][0]["options"]["detail"]
+        scopes = [el["scope"] for el in mt_detail["elements"]]
+        self.assertNotIn("#/properties/@type", scopes)
+
+
+# ===================================================================
+# Schema defaults injection tests
+# ===================================================================
+
+
+class SchemaDefaultsInjectionTest(TestCase):
+    def test_injects_variable_measured_at_type_default(self):
+        result = inject_schema_defaults(VARIABLE_MEASURED_SCHEMA)
+        at_type = result["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
+        self.assertEqual(at_type["default"], ["schema:PropertyValue"])
+
+    def test_does_not_overwrite_existing_default(self):
+        schema = json.loads(json.dumps(VARIABLE_MEASURED_SCHEMA))
+        schema["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]["default"] = [
+            "cdi:InstanceVariable",
+            "schema:PropertyValue",
+        ]
+        result = inject_schema_defaults(schema)
+        at_type = result["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
+        self.assertEqual(at_type["default"], ["cdi:InstanceVariable", "schema:PropertyValue"])
+
+    def test_does_not_mutate_original(self):
+        original_copy = json.loads(json.dumps(VARIABLE_MEASURED_SCHEMA))
+        inject_schema_defaults(VARIABLE_MEASURED_SCHEMA)
+        self.assertEqual(VARIABLE_MEASURED_SCHEMA, original_copy)
+
+    def test_schema_without_variable_measured_unchanged(self):
+        result = inject_schema_defaults(SIMPLE_SCHEMA)
+        self.assertEqual(result, SIMPLE_SCHEMA)
+
+    def test_skips_non_array_at_type(self):
+        """Only injects default for array-typed @type (not string const)."""
+        schema = {
+            "type": "object",
+            "properties": {
+                "schema:variableMeasured": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "@type": {
+                                "type": "string",
+                                "const": "schema:PropertyValue",
+                            },
+                        },
+                    },
+                },
+            },
+        }
+        result = inject_schema_defaults(schema)
+        at_type = result["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
+        self.assertNotIn("default", at_type)
+
+    def test_injects_show_advanced_boolean(self):
+        result = inject_schema_defaults(VARIABLE_MEASURED_SCHEMA)
+        props = result["properties"]["schema:variableMeasured"]["items"]["properties"]
+        self.assertIn("_showAdvanced", props)
+        self.assertEqual(props["_showAdvanced"]["type"], "boolean")
+        self.assertFalse(props["_showAdvanced"]["default"])
+
+    def test_injects_distribution_type_selector(self):
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        self.assertIn("_distributionType", dist_props)
+        self.assertEqual(dist_props["_distributionType"]["enum"], ["Data Download", "Web API"])
+        self.assertEqual(dist_props["_distributionType"]["default"], "Data Download")
+
+    def test_injects_webapi_properties(self):
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        self.assertIn("schema:serviceType", dist_props)
+        self.assertIn("schema:documentation", dist_props)
+        self.assertEqual(dist_props["schema:documentation"]["format"], "uri")
+
+    def test_injects_mime_type_one_of_on_encoding_format(self):
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        enc_items = dist_props["schema:encodingFormat"]["items"]
+        self.assertIn("oneOf", enc_items)
+        self.assertEqual(enc_items["oneOf"], MIME_TYPE_OPTIONS)
+
+    def test_injects_mime_type_one_of_on_has_part_encoding_format(self):
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        hp_enc_items = dist_props["schema:hasPart"]["items"]["properties"]["schema:encodingFormat"]["items"]
+        self.assertIn("oneOf", hp_enc_items)
+        self.assertEqual(hp_enc_items["oneOf"], MIME_TYPE_OPTIONS)
+
+    def test_schema_without_distribution_unchanged(self):
+        """Distribution injection skips schemas without schema:distribution."""
+        result = inject_schema_defaults(SIMPLE_SCHEMA)
+        self.assertNotIn("schema:distribution", result.get("properties", {}))
+
 
 # ===================================================================
 # ProfileSerializer injection test
@@ -559,7 +837,7 @@ class VariablePanelInjectionTest(TestCase):
 
 
 class ProfileSerializerInjectionTest(TestCase):
-    def test_profile_detail_injects_vocabulary(self):
+    def test_profile_detail_injects_variable_layout(self):
         profile = Profile.objects.create(
             name="testProfile",
             schema=SIMPLE_SCHEMA,
@@ -569,28 +847,43 @@ class ProfileSerializerInjectionTest(TestCase):
         resp = self.client.get(f"/api/catalog/profiles/{profile.name}/")
         self.assertEqual(resp.status_code, 200)
         uischema = resp.json()["uischema"]
-        # Creator should have vocabulary injected
+        # Variable detail should be injected
+        var_ctrl = uischema["elements"][5]["elements"][0]
+        detail = var_ctrl["options"]["detail"]
+        # name, propertyID, description, _showAdvanced toggle, Advanced group
+        self.assertEqual(len(detail["elements"]), 5)
+
+    def test_profile_detail_does_not_inject_vocabulary(self):
+        """With VOCABULARY_ENABLED=False, no vocabulary on creator."""
+        profile = Profile.objects.create(
+            name="testProfile2",
+            schema=SIMPLE_SCHEMA,
+            uischema=SAMPLE_UISCHEMA,
+        )
+        self.client = APIClient()
+        resp = self.client.get(f"/api/catalog/profiles/{profile.name}/")
+        self.assertEqual(resp.status_code, 200)
+        uischema = resp.json()["uischema"]
         creator = uischema["elements"][0]
-        self.assertIn("vocabulary", creator.get("options", {}))
+        self.assertNotIn("vocabulary", creator.get("options", {}))
+
+    def test_profile_detail_injects_schema_defaults(self):
+        profile = Profile.objects.create(
+            name="testProfile3",
+            schema=VARIABLE_MEASURED_SCHEMA,
+            uischema=SAMPLE_UISCHEMA,
+        )
+        self.client = APIClient()
+        resp = self.client.get(f"/api/catalog/profiles/{profile.name}/")
+        self.assertEqual(resp.status_code, 200)
+        schema = resp.json()["schema"]
+        at_type = schema["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
+        self.assertEqual(at_type["default"], ["schema:PropertyValue"])
 
 
 # ===================================================================
 # Record create/update triggers upsert
 # ===================================================================
-
-
-import unittest
-
-
-def requires_postgresql(test_func):
-    """Skip test if not running on PostgreSQL (ArrayField/GinIndex are PG-only)."""
-    def wrapper(*args, **kwargs):
-        if connection.vendor != "postgresql":
-            raise unittest.SkipTest("Requires PostgreSQL (ArrayField/GinIndex)")
-        return test_func(*args, **kwargs)
-    wrapper.__name__ = test_func.__name__
-    wrapper.__doc__ = test_func.__doc__
-    return wrapper
 
 
 class RecordUpsertIntegrationTest(TestCase):
@@ -635,3 +928,220 @@ class RecordUpsertIntegrationTest(TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertTrue(KnownPerson.objects.filter(name="Joe Test").exists())
+
+
+# ===================================================================
+# Distribution UISchema injection tests
+# ===================================================================
+
+
+class DistributionInjectionTest(TestCase):
+    def _get_distribution_detail(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        dist_group = result["elements"][6]
+        dist_ctrl = dist_group["elements"][0]
+        return dist_ctrl["options"]["detail"]
+
+    def test_distribution_detail_injected(self):
+        detail = self._get_distribution_detail()
+        self.assertEqual(detail["type"], "VerticalLayout")
+        # _distributionType, name, description, contentUrl, encodingFormat, hasPart, serviceType, documentation
+        self.assertEqual(len(detail["elements"]), 8)
+
+    def test_distribution_type_selector(self):
+        detail = self._get_distribution_detail()
+        type_ctrl = detail["elements"][0]
+        self.assertEqual(type_ctrl["scope"], "#/properties/_distributionType")
+        self.assertEqual(type_ctrl["label"], "Distribution Type")
+
+    def test_content_url_has_show_rule(self):
+        detail = self._get_distribution_detail()
+        content_url = detail["elements"][3]
+        self.assertEqual(content_url["scope"], "#/properties/schema:contentUrl")
+        self.assertEqual(content_url["rule"]["effect"], "SHOW")
+        self.assertEqual(
+            content_url["rule"]["condition"]["schema"], {"const": "Data Download"}
+        )
+
+    def test_encoding_format_has_show_rule(self):
+        detail = self._get_distribution_detail()
+        enc_fmt = detail["elements"][4]
+        self.assertEqual(enc_fmt["scope"], "#/properties/schema:encodingFormat")
+        self.assertEqual(enc_fmt["rule"]["effect"], "SHOW")
+        self.assertEqual(
+            enc_fmt["rule"]["condition"]["schema"], {"const": "Data Download"}
+        )
+
+    def test_archive_contents_has_and_rule(self):
+        detail = self._get_distribution_detail()
+        has_part = detail["elements"][5]
+        self.assertEqual(has_part["scope"], "#/properties/schema:hasPart")
+        self.assertEqual(has_part["label"], "Archive Contents")
+        rule = has_part["rule"]
+        self.assertEqual(rule["effect"], "SHOW")
+        self.assertEqual(rule["condition"]["type"], "AND")
+        conditions = rule["condition"]["conditions"]
+        self.assertEqual(len(conditions), 2)
+        # First condition: _distributionType == "Data Download"
+        self.assertEqual(conditions[0]["schema"], {"const": "Data Download"})
+        # Second condition: encodingFormat contains "application/zip"
+        self.assertEqual(
+            conditions[1]["schema"], {"contains": {"const": "application/zip"}}
+        )
+
+    def test_service_type_has_webapi_rule(self):
+        detail = self._get_distribution_detail()
+        svc = detail["elements"][6]
+        self.assertEqual(svc["scope"], "#/properties/schema:serviceType")
+        self.assertEqual(svc["rule"]["effect"], "SHOW")
+        self.assertEqual(svc["rule"]["condition"]["schema"], {"const": "Web API"})
+
+    def test_documentation_has_webapi_rule(self):
+        detail = self._get_distribution_detail()
+        doc = detail["elements"][7]
+        self.assertEqual(doc["scope"], "#/properties/schema:documentation")
+        self.assertEqual(doc["rule"]["effect"], "SHOW")
+        self.assertEqual(doc["rule"]["condition"]["schema"], {"const": "Web API"})
+
+    def test_has_part_detail_layout(self):
+        detail = self._get_distribution_detail()
+        has_part = detail["elements"][5]
+        hp_detail = has_part["options"]["detail"]
+        self.assertEqual(hp_detail["type"], "VerticalLayout")
+        scopes = [el["scope"] for el in hp_detail["elements"]]
+        self.assertIn("#/properties/schema:name", scopes)
+        self.assertIn("#/properties/schema:encodingFormat", scopes)
+
+    def test_distribution_element_label_prop(self):
+        result = inject_uischema(SAMPLE_UISCHEMA)
+        dist_ctrl = result["elements"][6]["elements"][0]
+        self.assertEqual(dist_ctrl["options"]["elementLabelProp"], "schema:name")
+
+
+# ===================================================================
+# MIME type options tests
+# ===================================================================
+
+
+class MimeTypeOptionsTest(TestCase):
+    def test_mime_type_options_count(self):
+        self.assertEqual(len(MIME_TYPE_OPTIONS), 26)
+
+    def test_each_option_has_const_and_title(self):
+        for opt in MIME_TYPE_OPTIONS:
+            self.assertIn("const", opt)
+            self.assertIn("title", opt)
+
+    def test_application_zip_present(self):
+        consts = [o["const"] for o in MIME_TYPE_OPTIONS]
+        self.assertIn("application/zip", consts)
+
+    def test_text_csv_present(self):
+        consts = [o["const"] for o in MIME_TYPE_OPTIONS]
+        self.assertIn("text/csv", consts)
+
+    def test_title_format_includes_extension_and_media_type(self):
+        csv_opt = next(o for o in MIME_TYPE_OPTIONS if o["const"] == "text/csv")
+        self.assertIn(".csv", csv_opt["title"])
+        self.assertIn("text/csv", csv_opt["title"])
+
+    def test_options_sorted_by_const(self):
+        consts = [o["const"] for o in MIME_TYPE_OPTIONS]
+        self.assertEqual(consts, sorted(consts))
+
+
+# ===================================================================
+# Serializer data cleanup tests
+# ===================================================================
+
+
+class SerializerDataCleanupTest(TestCase):
+    """Test that validate() strips UI-only fields and sets @type correctly."""
+
+    def setUp(self):
+        self.profile = Profile.objects.create(
+            name="cleanupTest",
+            schema={},  # No validation
+        )
+
+    def _make_attrs(self, jsonld):
+        return {"jsonld": jsonld, "profile": self.profile}
+
+    def test_strips_show_advanced_from_variables(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:variableMeasured": [
+                {"schema:name": "Temp", "_showAdvanced": True},
+                {"schema:name": "Depth", "_showAdvanced": False},
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        for var in attrs["jsonld"]["schema:variableMeasured"]:
+            self.assertNotIn("_showAdvanced", var)
+
+    def test_strips_distribution_type_and_sets_data_download(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {"schema:name": "File", "_distributionType": "Data Download"},
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertNotIn("_distributionType", dist)
+        self.assertEqual(dist["@type"], ["schema:DataDownload"])
+
+    def test_strips_distribution_type_and_sets_web_api(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {"schema:name": "API", "_distributionType": "Web API"},
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertNotIn("_distributionType", dist)
+        self.assertEqual(dist["@type"], ["schema:WebAPI"])
+
+    def test_no_distribution_type_defaults_to_data_download(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {"schema:name": "File"},
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["@type"], ["schema:DataDownload"])
+
+    def test_existing_at_type_preserved_when_no_distribution_type(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {"schema:name": "File", "@type": ["schema:DataDownload"]},
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["@type"], ["schema:DataDownload"])
+
+    def test_web_api_overwrites_existing_at_type(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "API",
+                    "@type": ["schema:DataDownload"],
+                    "_distributionType": "Web API",
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["@type"], ["schema:WebAPI"])
