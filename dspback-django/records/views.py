@@ -9,7 +9,7 @@ from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action, api_view, permission_classes
 from rest_framework.response import Response
 
-from records.models import Profile, Record
+from records.models import KnownOrganization, KnownPerson, Profile, Record
 from records.serializers import (
     ImportFileSerializer,
     ImportURLSerializer,
@@ -18,7 +18,7 @@ from records.serializers import (
     RecordListSerializer,
     RecordSerializer,
 )
-from records.services import extract_indexed_fields, fetch_jsonld_from_url
+from records.services import extract_indexed_fields, fetch_jsonld_from_url, upsert_known_entities
 from records.validators import validate_record
 
 logger = logging.getLogger(__name__)
@@ -161,6 +161,7 @@ class RecordViewSet(viewsets.ModelViewSet):
                 )
 
         fields = extract_indexed_fields(jsonld)
+        upsert_known_entities(jsonld)
         record = Record.objects.create(
             profile=profile,
             jsonld=jsonld,
@@ -203,6 +204,7 @@ class RecordViewSet(viewsets.ModelViewSet):
                 )
 
         fields = extract_indexed_fields(jsonld)
+        upsert_known_entities(jsonld)
         record = Record.objects.create(
             profile=profile,
             jsonld=jsonld,
@@ -216,3 +218,66 @@ class RecordViewSet(viewsets.ModelViewSet):
             RecordSerializer(record, context={"request": request}).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def persons_search(request):
+    """Search known persons by name for autocomplete pick lists."""
+    q = request.query_params.get("q", "").strip()
+    qs = KnownPerson.objects.all()
+    if q:
+        qs = qs.filter(name__icontains=q)
+    qs = qs.order_by("-last_seen")[:50]
+
+    results = []
+    for person in qs:
+        item = {"schema:name": person.name}
+        if person.identifier_value:
+            item["schema:identifier"] = {
+                "@type": "schema:PropertyValue",
+                "schema:propertyID": person.identifier_type,
+                "schema:value": person.identifier_value,
+                "schema:url": person.identifier_url,
+            }
+        if person.affiliation_name:
+            affil = {
+                "@type": "schema:Organization",
+                "schema:name": person.affiliation_name,
+            }
+            if person.affiliation_identifier_value:
+                affil["schema:identifier"] = {
+                    "@type": "schema:PropertyValue",
+                    "schema:propertyID": person.affiliation_identifier_type,
+                    "schema:value": person.affiliation_identifier_value,
+                    "schema:url": person.affiliation_identifier_url,
+                }
+            item["schema:affiliation"] = affil
+        results.append(item)
+
+    return Response({"results": results})
+
+
+@api_view(["GET"])
+@permission_classes([permissions.AllowAny])
+def organizations_search(request):
+    """Search known organizations by name for autocomplete pick lists."""
+    q = request.query_params.get("q", "").strip()
+    qs = KnownOrganization.objects.all()
+    if q:
+        qs = qs.filter(name__icontains=q)
+    qs = qs.order_by("-last_seen")[:50]
+
+    results = []
+    for org in qs:
+        item = {"schema:name": org.name}
+        if org.identifier_value:
+            item["schema:identifier"] = {
+                "@type": "schema:PropertyValue",
+                "schema:propertyID": org.identifier_type,
+                "schema:value": org.identifier_value,
+                "schema:url": org.identifier_url,
+            }
+        results.append(item)
+
+    return Response({"results": results})

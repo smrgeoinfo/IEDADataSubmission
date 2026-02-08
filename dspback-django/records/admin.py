@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from records.models import Profile, Record
+from records.models import KnownOrganization, KnownPerson, Profile, Record
 
 
 @admin.register(Profile)
@@ -18,3 +18,17 @@ class RecordAdmin(admin.ModelAdmin):
     search_fields = ("title", "identifier", "creators")
     readonly_fields = ("id", "created_at", "updated_at")
     raw_id_fields = ("owner",)
+
+
+@admin.register(KnownPerson)
+class KnownPersonAdmin(admin.ModelAdmin):
+    list_display = ("name", "identifier_type", "identifier_value", "affiliation_name", "last_seen")
+    search_fields = ("name", "identifier_value", "affiliation_name")
+    readonly_fields = ("last_seen", "created_at")
+
+
+@admin.register(KnownOrganization)
+class KnownOrganizationAdmin(admin.ModelAdmin):
+    list_display = ("name", "identifier_type", "identifier_value", "last_seen")
+    search_fields = ("name", "identifier_value")
+    readonly_fields = ("last_seen", "created_at")

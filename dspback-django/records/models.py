@@ -81,3 +81,53 @@ class Record(models.Model):
 
     def __str__(self):
         return f"{self.title or self.identifier} ({self.profile.name})"
+
+
+class KnownPerson(models.Model):
+    """Accumulated person entities extracted from saved records."""
+
+    name = models.TextField(db_index=True)
+    identifier_type = models.TextField(blank=True, default="")
+    identifier_value = models.TextField(blank=True, default="")
+    identifier_url = models.TextField(blank=True, default="")
+    affiliation_name = models.TextField(blank=True, default="")
+    affiliation_identifier_type = models.TextField(blank=True, default="")
+    affiliation_identifier_value = models.TextField(blank=True, default="")
+    affiliation_identifier_url = models.TextField(blank=True, default="")
+    last_seen = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "identifier_value"],
+                name="unique_person_name_id",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class KnownOrganization(models.Model):
+    """Accumulated organization entities extracted from saved records."""
+
+    name = models.TextField(db_index=True)
+    identifier_type = models.TextField(blank=True, default="")
+    identifier_value = models.TextField(blank=True, default="")
+    identifier_url = models.TextField(blank=True, default="")
+    last_seen = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name", "identifier_value"],
+                name="unique_org_name_id",
+            ),
+        ]
+
+    def __str__(self):
+        return self.name

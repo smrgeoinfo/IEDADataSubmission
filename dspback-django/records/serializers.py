@@ -3,7 +3,8 @@ import uuid
 from rest_framework import serializers
 
 from records.models import Profile, Record
-from records.services import extract_indexed_fields
+from records.services import extract_indexed_fields, upsert_known_entities
+from records.uischema_injection import inject_vocabulary
 from records.validators import validate_record
 
 
@@ -30,6 +31,12 @@ class ProfileSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get("uischema"):
+            data["uischema"] = inject_vocabulary(data["uischema"])
+        return data
 
 
 class ProfileListSerializer(serializers.ModelSerializer):
@@ -108,6 +115,7 @@ class RecordSerializer(serializers.ModelSerializer):
         validated_data["identifier"] = fields["identifier"] or str(uuid.uuid4())
         validated_data["owner"] = self.context["request"].user
 
+        upsert_known_entities(jsonld)
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -118,6 +126,7 @@ class RecordSerializer(serializers.ModelSerializer):
             validated_data["creators"] = fields["creators"]
             if fields["identifier"]:
                 validated_data["identifier"] = fields["identifier"]
+            upsert_known_entities(jsonld)
 
         return super().update(instance, validated_data)
 
