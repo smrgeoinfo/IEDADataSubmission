@@ -174,12 +174,42 @@ Component names, class names, and CSS selectors updated accordingly (e.g., `cz-a
 
 **MIME Type Selectable List:**
 - 26-entry `MIME_TYPE_OPTIONS` constant with `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format. Sorted alphabetically by media type. Derived from the `adaFileExtensions` lookup table.
-- Injected as `oneOf` on `schema:encodingFormat.items` for both distribution items and hasPart items (files within archives). CzForm renders `oneOf` on primitive strings as a searchable dropdown.
+- `MIME_TYPE_ENUM` flat list of media type strings derived from `MIME_TYPE_OPTIONS`. CzForm doesn't render `oneOf` on primitive strings as a searchable dropdown, so `enum` is used instead.
+- Injected as `enum` on `schema:encodingFormat.items` for both distribution items and hasPart items (files within archives).
 
 **Key finding:** JSON Forms rules work on Groups, not just Controls. `@jsonforms/core` supports `rule.effect: "SHOW"/"HIDE"` on any UISchema element (Controls, Groups, Layouts), with `OR`/`AND` compound conditions and `SchemaBasedCondition` with `failWhenUndefined`.
 
+**CzForm limitation:** CzForm does NOT support `oneOf` on primitive string items — results in "No applicable renderer found". Use `enum` instead for selectable dropdowns on string fields.
+
 **Files changed:**
-- `dspback-django/records/uischema_injection.py` — MIME_TYPE_OPTIONS, DISTRIBUTION_DETAIL, HAS_PART_DETAIL, DISTRIBUTION_SCOPES, updated VARIABLE_DETAIL with rule, expanded inject_schema_defaults and inject_uischema
+- `dspback-django/records/uischema_injection.py` — MIME_TYPE_OPTIONS, MIME_TYPE_ENUM, DISTRIBUTION_DETAIL, HAS_PART_DETAIL, DISTRIBUTION_SCOPES, updated VARIABLE_DETAIL with rule, expanded inject_schema_defaults and inject_uischema
 - `dspback-django/records/serializers.py` — Cleanup logic in validate() for _showAdvanced and _distributionType
 - `dspfront/src/services/catalog.ts` — _distributionType initialization in populateOnLoad()
 - `dspback-django/records/tests.py` — 30+ new tests (99 total, up from 51)
+
+## 2026-02-08: CDIF Funding UISchema and Schema Fixes
+
+**What changed:** Fixed three issues in the CDIF Discovery profile's funding section.
+
+**Bug 1 — "No applicable renderer found" in funding detail:**
+The hand-crafted CDIF uischema (`OCGbuildingBlockTest/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json`) had wrong scopes in the funding detail — missing `schema:` prefixes. CzForm couldn't find renderers because the scopes didn't match any schema properties.
+
+Fixes applied:
+- `#/properties/name` → `#/properties/schema:name`
+- `#/properties/identifier` → `#/properties/schema:identifier`
+- `#/properties/funder/properties/schema:name` → `#/properties/schema:funder/properties/schema:name`
+- `elementLabelProp: "name"` → `"schema:name"`
+
+**Bug 2 — Grant identifier missing detail layout:**
+`schema:identifier` in funding items is a `PropertyValue` object (with `schema:propertyID`, `schema:value`, `schema:url`), not a simple string. Without a detail layout, CzForm rendered it as an opaque object. Added a proper detail layout with ID Type, ID Value, and ID URL controls.
+
+**Bug 3 — `schema:description` not in funding schema:**
+Metadata files may include `schema:description` on funding items (e.g., grant acknowledgement text). This property was missing from the funder building block schema, so it couldn't be displayed or round-tripped. Added `schema:description: {type: string}` to the funder schema and a "Description" control to the funding detail in the uischema.
+
+**Validation note:** `schema:funder` is correctly required in funding items (via `allOf`). Metadata files with funding items that lack `schema:funder` will trigger a validation warning — this is expected and correct.
+
+**Files changed:**
+- `OCGbuildingBlockTest/_sources/schemaorgProperties/funder/schema.yaml` — Added `schema:description` property
+- `OCGbuildingBlockTest/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json` — Fixed funding scopes, added identifier detail, added description control
+- `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/schema.json` — Added `schema:description` to funding items
+- `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/uischema.json` — Same fixes as source

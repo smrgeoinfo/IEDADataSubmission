@@ -287,7 +287,7 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
-| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, MIME type oneOf on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_OPTIONS |
+| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, MIME type enum on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM |
 | `dspback-django/records/tests.py` | 99 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
 | `dspback-django/records/management/commands/backfill_entities.py` | Populates KnownPerson/KnownOrganization from all existing records |
@@ -355,7 +355,19 @@ Schema injection adds `_distributionType` enum, `schema:serviceType`, and `schem
 
 ### MIME Type Selectable List
 
-26 MIME types from the `adaFileExtensions` lookup table are hardcoded in `MIME_TYPE_OPTIONS` (sorted alphabetically by media type). Each entry has `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format so CzForm's enum renderer allows searching by extension, type name, or media type. Injected as `oneOf` on `encodingFormat.items` for both distribution and hasPart items.
+26 MIME types from the `adaFileExtensions` lookup table are hardcoded in `MIME_TYPE_OPTIONS` (sorted alphabetically by media type). Each entry has `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format. `MIME_TYPE_ENUM` is a flat list of media type strings derived from `MIME_TYPE_OPTIONS`. CzForm does NOT support `oneOf` on primitive string items (causes "No applicable renderer found"), so `enum` is used instead. Injected on `encodingFormat.items` for both distribution and hasPart items.
+
+### CDIF Profile Schema Notes
+
+The CDIF Discovery profile schema is built from OGC Building Block source schemas under `OCGbuildingBlockTest/_sources/`. Key authoring pitfalls:
+
+**UISchema scopes must match schema property names exactly.** All schema.org properties use the `schema:` prefix (e.g., `schema:name`, `schema:funder`). UISchema scopes must include this prefix — `#/properties/schema:name` not `#/properties/name`. Missing prefixes cause "No applicable renderer found" errors because CzForm can't resolve the scope to a schema property.
+
+**Object properties need detail layouts.** When a schema property is an object (e.g., `schema:identifier` is a `PropertyValue` with `schema:propertyID`, `schema:value`, `schema:url`), the UISchema must provide an `options.detail` layout specifying which sub-properties to render. Without it, CzForm renders the object as opaque.
+
+**Funding schema** (`_sources/schemaorgProperties/funder/schema.yaml`): Requires `schema:funder` (via `allOf`), plus one of `schema:identifier` or `schema:name`. Properties: `@type` (default: `schema:MonetaryGrant`), `schema:name`, `schema:description`, `schema:funder` (Organization with required `schema:name`), `schema:identifier` (PropertyValue with `schema:propertyID`, `schema:value`, `schema:url` where url has `format: "uri"`).
+
+**Validation sources:** Frontend uses AJV (via `@cznethub/cznet-vue-core`), backend uses Python `jsonschema` (auto-detects Draft-07 vs Draft-2020-12 from `$schema`). Both validate against the same profile schema. Error messages like "must have required property" come from AJV; "Required fields missing" is the Vue component's wrapper around AJV errors.
 
 ### Serve-Time Injection Pattern
 
