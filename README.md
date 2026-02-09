@@ -317,8 +317,7 @@ OCGbuildingBlockTest/_sources/
 │   ├── dataCube/              # CDI DimensionalDataStructure multidimensional data
 │   ├── document/              # Supplemental documents (calibration, methods, logs)
 │   ├── otherFile/             # Non-standard file formats (EMSA, OBJ, STL, XLSX)
-│   ├── files/                 # File-level metadata (composes all detail types above)
-│   └── hasPartFile/           # Files within archive distributions
+│   └── files/                 # File-level metadata (generic, type constraints at profile level)
 └── profiles/
     └── adaProduct/            # Top-level ADA product profile (composes all BBs)
 ```
