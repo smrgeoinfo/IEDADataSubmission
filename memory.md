@@ -213,3 +213,25 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 - `OCGbuildingBlockTest/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json` — Fixed funding scopes, added identifier detail, added description control
 - `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/schema.json` — Added `schema:description` to funding items
 - `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/uischema.json` — Same fixes as source
+
+## 2026-02-08: Merge hasPartFile into files Building Block
+
+**What changed:** Consolidated `hasPartFile/` and `files/` into a single generic `files` building block. The `@type` constraint (`contains: const: "schema:DataDownload"`) was removed from `files/schema.yaml`, making it a reusable base for both top-level distribution files and archive member files. Type constraints are now applied at the composition level in profile schemas.
+
+**Why:** The two building blocks described essentially the same file-level metadata — the only difference was the `@type` constraint (DataDownload required in `files`, DataDownload forbidden in `hasPartFile`). Consolidating eliminates duplication and makes `files/schema.yaml` a single source of truth for file properties.
+
+**New distribution structure in `adaProduct/schema.yaml`:**
+- `schema:distribution.items` uses `oneOf` with two `allOf` branches:
+  - **Single file:** `$ref: files/schema.yaml` + overlay requiring `@type contains "schema:DataDownload"`
+  - **Archive with parts:** `$ref: files/schema.yaml` + overlay requiring `@type contains "schema:DataDownload"` + `schema:provider`, `schema:additionalType`, and `schema:hasPart`
+- `schema:hasPart.items` uses `allOf`: `$ref: files/schema.yaml` + overlay with `@type not contains "schema:DataDownload"`
+
+**Deleted:** `_sources/adaProperties/hasPartFile/` directory (schema.yaml, bblock.json, context.jsonld, description.md).
+
+**Files changed:**
+- `OCGbuildingBlockTest/_sources/adaProperties/files/schema.yaml` — Removed `contains`/`minItems` constraint on `@type`, updated description
+- `OCGbuildingBlockTest/_sources/profiles/adaProduct/schema.yaml` — Rewrote `schema:distribution` section with `oneOf`+`allOf` composition pattern
+- `OCGbuildingBlockTest/_sources/adaProperties/hasPartFile/` — Deleted entirely
+- `OCGbuildingBlockTest/agents.md` — Removed `hasPartFile` entry, updated `files` description
+- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
+- `README.md` — Updated building block tree to remove `hasPartFile`
