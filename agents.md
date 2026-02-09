@@ -241,12 +241,20 @@ The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 
 **Important:** CzForm's `renderers` is an internal class field (not a prop), so custom JSON Forms renderers cannot be injected. The Categorization tab handling is done at the parent component level instead.
 
-**Schema pipeline**: `convert_for_jsonforms.py` converts the BB-validated Draft 2020-12 schemas to JSON Forms-compatible Draft 7 by resolving all `$ref`, simplifying `anyOf` patterns, converting `const` → `default`, and merging technique profile `allOf` constraints.
+**Schema pipeline** (two-step):
+1. `resolve_schema.py` resolves modular YAML `$ref` references into a single `resolvedSchema.json` per profile (Draft 2020-12, all `$ref` inlined, `$defs` removed, `allOf` optionally flattened)
+2. `convert_for_jsonforms.py` reads `resolvedSchema.json` and converts to JSON Forms-compatible Draft 7 by simplifying `anyOf` patterns, converting `const` → `default`, `contains` → `enum`, merging technique constraints, and removing `not` constraints
 
-**Six profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`, `CDIFDiscovery` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`.
+```
+schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json
+```
+
+**Six profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`, `CDIFDiscovery` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets constraining which file types are valid for each technique.
 
 **Key files**:
-- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Schema conversion script
+- `OCGbuildingBlockTest/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
+- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — JSON Forms converter (resolvedSchema.json → schema.json)
+- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Fully resolved Draft 2020-12 schemas
 - `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/uischema.json` — Hand-crafted UI layouts
 - `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/defaults.json` — Default values
 - `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
@@ -261,12 +269,17 @@ The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 
 To add a new technique profile (e.g., `adaXRF`):
 
-1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. Copy from an existing technique profile (e.g., `adaEMPA`).
-2. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
-3. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`.
-4. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
-5. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
-6. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
+1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add:
+   - `schema:additionalType` constraint with `contains`/`enum` for valid component types
+   - `schema:measurementTechnique` constraint (if needed)
+   - `fileDetail` constraint with `anyOf` listing only the file types valid for this technique (e.g., `$ref: ../../adaProperties/tabularData/schema.yaml`)
+   - Copy from an existing technique profile (e.g., `adaEMPA`).
+2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `OCGbuildingBlockTest` directory.
+3. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
+4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
+5. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
+6. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
+7. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
 ## Catalog Backend (dspback-django)
 

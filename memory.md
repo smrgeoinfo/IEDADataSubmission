@@ -398,3 +398,49 @@ FILE_TYPE_TO_MIMES = {
 - `dspback-django/records/serializers.py` — hasPart encodingFormat string→array wrap on save
 - `dspfront/src/services/catalog.ts` — hasPart encodingFormat array→string unwrap in `populateOnLoad()`
 - `dspback-django/records/tests.py` — 130 tests (up from 123): `test_has_part_nested_archive`, `test_has_part_image_group`, `test_has_part_tabular_group`, `test_has_part_datacube_group`, `test_has_part_document_group`, `test_has_part_encoding_format_wrapped`, `test_has_part_empty_encoding_format_removed`
+
+## 2026-02-09: Flatten fileDetail and Full v3 Schema Alignment (adaMetadataViews)
+
+**What changed:** Restructured the JSON-LD template and views.py so that hasPart items in `schema:distribution` validate against `adaMetadata-SchemaOrgSchema-v3.json`. Result: 77/77 test files valid, 0 errors (down from 77 errors).
+
+**Root cause of prior failures:** Every hasPart item had hardcoded `@type: ["schema:MediaObject"]` with type-specific properties buried inside a `fileDetail` sub-object. The v3 schema's `files_type` requires each hasPart item to match one of the defined type schemas (image, tabular, dataCube, etc.) with `@type`, `componentType`, and type-specific properties at the **top level**.
+
+**Key changes:**
+
+1. **Template restructure (`templates/adaJSONLD.json`):**
+   - `@type` now emits actual type from `keyset.type_` instead of hardcoded `["schema:MediaObject"]`
+   - `componentType` emitted at top level (skipped for Metadata files)
+   - `cdi:hasPhysicalMapping` replaces old `cdi:isStructuredBy` / `DataStructureComponent` nesting
+   - `tabularProps` (e.g., `cdi:isDelimited: true`) emitted as top-level properties
+   - `thedetail` properties flattened to top level
+   - `fileDetail` wrapper completely removed
+
+2. **`@type` fixes (`viewapp/views.py`):**
+   - tabularData: `"cdi:PhysicalDataSet"` → `"cdi:TabularTextDataSet"`
+   - dataCube: `"cdi:DimensionalDataStructure"` → `"cdi:StructuredDataSet"`
+   - metadata: `["ada:metadata", "schema:Dataset"]` → `["Metadata"]`
+   - fallback (no subject): `["schema:MediaObject"]` → `["ada:otherFileType"]`, componentType `"unknown"` → `"ada:other"`
+   - empty fallback: `["noComponentFiles"]` → `["ada:otherFileType"]`, componentType `"missing"` → `"ada:other"`
+
+3. **Added `tabularProps`** (`viewapp/views.py`): `fileitem['tabularProps'] = {'cdi:isDelimited': True}` in the tabular branch, satisfying `tabularData_type`'s `oneOf` requiring either `cdi:isDelimited: true` or `cdi:isFixedWidth: true`.
+
+4. **`schema:encodingFormat` omitted for `other_type` items** — critical schema conflict fix (see below).
+
+**schema:encodingFormat conflict in other_type (important for future schema work):**
+
+The v3 schema's `other_type` defines `schema:encodingFormat` as an `enum` of specific human-readable format descriptions (`"Spectral Data Exchange File (.emsa)"`, `"3D model file (.obj)"`, etc.), while the base `files_type` defines it as `{"type": "array", "items": {"type": "string"}}` (MIME type arrays). Since `files_type` uses `allOf` (base AND anyOf type-specific), both constraints apply simultaneously to the same value. No value can satisfy both — an array `["text/csv"]` passes the base but fails the enum; a string `"3D model file (.obj)"` passes the enum but fails the array type.
+
+**Fix:** The template conditionally skips `schema:encodingFormat` for `other_type` items:
+```django
+{% if "ada:otherFileType" not in fileitem.keyset.type_ %}
+,"schema:encodingFormat": ["{{fileitem.keyset.encodingFormat}}"]
+{% endif %}
+```
+Neither the base nor `other_type` schemas require the property, so omitting it satisfies both vacuously.
+
+**Data finding:** None of the 77 test DOIs have `subject_schema_id=6` records, so ALL non-metadata files fall through to the `other_type` fallback path. The type-specific code paths (tabular, image, dataCube, etc.) are unreachable with the current test data — they will only activate when the ADA database has file-level subject metadata populated.
+
+**Files changed:**
+- `adaMetadataViews/viewapp/views.py` — `@type` fixes, `tabularProps`, `thedetail = {}` for metadata/fallback paths
+- `adaMetadataViews/templates/adaJSONLD.json` — Complete hasPart restructure, conditional encodingFormat
+- `adaMetadataViews/Standalone/regen_test_json.py` — New utility script for regenerating test JSON
