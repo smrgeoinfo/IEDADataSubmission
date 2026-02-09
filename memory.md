@@ -235,3 +235,73 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 - `OCGbuildingBlockTest/agents.md` — Removed `hasPartFile` entry, updated `files` description
 - `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
 - `README.md` — Updated building block tree to remove `hasPartFile`
+
+## 2026-02-09: Resolved (JSON) Button in bblocks-viewer
+
+**What changed:** Added a "Resolved (JSON)" button to the bblocks-viewer's JSON Schema tab, allowing users to view the fully resolved schema (all `$ref` inlined, `allOf` flattened, no `$defs`) directly in the viewer.
+
+**Three-part implementation:**
+
+1. **`augment_register.py`** — New script that injects `resolvedSchema` URLs into `build/register.json` for profile building blocks. Scans bblock identifiers for `.profiles.{name}` patterns and maps to `_sources/profiles/{name}/resolvedSchema.json` on GitHub Pages.
+
+2. **bblocks-viewer fork** (`/tmp/bblocks-viewer/`) — Two files modified:
+   - `src/components/bblock/JsonSchemaViewer.vue` — Added 4th button "Resolved (JSON)" (conditionally shown when `bblock.resolvedSchema` exists), with lazy fetch via `fetchDocumentByUrl()`, loading spinner, error alert, and URL display. The button has a tooltip: "Fully resolved schema with all $ref inlined and allOf flattened — no external references".
+   - `src/services/bblock.service.js` — Added `'resolvedSchema'` to `COPY_PROPERTIES` so the URL persists through `fetchBBlock()` (which loads from `json-full` and only copies whitelisted properties from the register entry).
+
+3. **Workflow integration** — `generate-jsonforms.yml` now runs `augment_register.py` after `convert_for_jsonforms.py` and stages `build/register.json` in the commit step.
+
+**Also changed:** `cors_server.py` now accepts an optional directory argument (`python tools/cors_server.py 8090 /path/to/dir`) for serving from a specific directory.
+
+**Key finding:** `fetchBBlock()` in `bblock.service.js` loads full bblock data from a separate `json-full` URL and only copies `COPY_PROPERTIES` from the register entry. Any custom properties added to `register.json` must be added to this whitelist or they'll be silently dropped.
+
+**Files changed:**
+- `OCGbuildingBlockTest/tools/augment_register.py` — New script
+- `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — Added augment step + register.json staging
+- `OCGbuildingBlockTest/tools/cors_server.py` — Added directory argument
+- `OCGbuildingBlockTest/build/register.json` — 6 profile bblocks now have `resolvedSchema` URLs
+- `/tmp/bblocks-viewer/src/components/bblock/JsonSchemaViewer.vue` — Added Resolved (JSON) button
+- `/tmp/bblocks-viewer/src/services/bblock.service.js` — Added `resolvedSchema` to COPY_PROPERTIES
+
+## 2026-02-09: resolvedSchema.json as Source of Truth for JSON Forms
+
+**What changed:** Refactored the JSON Forms schema pipeline so that `resolvedSchema.json` (produced by `resolve_schema.py`) is the single source of truth. The old pipeline read from OGC postprocessor output (`build/annotated/`); the new pipeline reads from the resolved schemas directly.
+
+**New pipeline:**
+```
+schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json
+```
+
+**Three issues fixed:**
+
+1. **`deep_merge` conflict (resolve_schema.py):** When `flatten_allof` merges `cdifMandatory` (which has `anyOf` on distribution) and `adaProduct` (which has `oneOf`), both keywords ended up in the same object — an invalid schema. Fixed with an `_is_complete_schema` heuristic: when merging `properties` dicts, if the overlay property has `type`, `oneOf`, `anyOf`, `allOf`, or `$ref`, it **replaces** the base entirely. Partial constraint patches (no composition keywords) are deep-merged to preserve the base structure. This correctly handles both adaProduct replacing cdifMandatory's distribution AND technique profiles deep-merging constraints into adaProduct.
+
+2. **WebAPI distribution branch (adaProduct/schema.yaml):** Distribution now has 3 `oneOf` branches:
+   - Branch 1: Single DataDownload file
+   - Branch 2: DataDownload archive with `schema:hasPart`
+   - Branch 3: WebAPI with `schema:potentialAction` → Action → `schema:result` (which reuses single-file/archive oneOf)
+
+3. **Technique-specific fileDetail constraints:** Each technique profile now constrains `fileDetail` to only the file types valid for that technique (via `anyOf` subsets), rather than inheriting all 8 file types from the base profile:
+   - adaEMPA: imageMap, image, tabularData, collection, supDocImage, document
+   - adaICPMS: tabularData, collection, document
+   - adaVNMIR: tabularData, imageMap, dataCube, supDocImage, document
+   - adaXRD: tabularData, image, document
+
+**Cross-def fragment resolution fix (resolve_schema.py):** Added `_inline_unresolved_defs` function. Pass 1 resolves each `$def` with an empty defs dict, so cross-def fragment refs (e.g., `#/$defs/VariableMeasured` referenced from another def) become `$comment` placeholders. Pass 2 walks the schema and replaces those placeholders with the actual resolved content.
+
+**convert_for_jsonforms.py refactor:**
+- Changed input source from `build/annotated/bbr/metadata/profiles/{name}/schema.json` to `_sources/profiles/{name}/resolvedSchema.json`
+- Removed dead code: `resolve_external_refs`, `_resolve_json_pointer`, `merge_allof_entries`, `merge_technique_profile`, `resolve_all_refs`, `convert_defs_to_definitions`, `deep_merge`, `GHPAGES_PREFIX`, `LOCAL_ANNOTATED`, `BASE_PROFILES`, `ANNOTATED_DIR`
+- New `simplify_distribution_items()` preserves `oneOf` structure and merges technique constraints into applicable branches
+- New `simplify_file_detail_anyof()` preserves `anyOf` of file types
+- Pipeline order fix: `simplify_contains_to_enum` must run before `simplify_const_to_default` (otherwise WebAPI `@type` `contains.const` gets converted to `contains.default` and the enum simplifier can't find it)
+
+**Files changed:**
+- `OCGbuildingBlockTest/tools/resolve_schema.py` — `deep_merge` → `_deep_merge_inner` with `_is_complete_schema` heuristic; added `_inline_unresolved_defs` for pass-2 cross-def resolution
+- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Complete refactor to read from resolvedSchema.json
+- `OCGbuildingBlockTest/_sources/profiles/adaProduct/schema.yaml` — Added WebAPI as 3rd distribution oneOf branch
+- `OCGbuildingBlockTest/_sources/profiles/adaEMPA/schema.yaml` — Added fileDetail anyOf constraint (6 file types)
+- `OCGbuildingBlockTest/_sources/profiles/adaICPMS/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
+- `OCGbuildingBlockTest/_sources/profiles/adaVNMIR/schema.yaml` — Added fileDetail anyOf constraint (5 file types)
+- `OCGbuildingBlockTest/_sources/profiles/adaXRD/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
+- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
+- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
