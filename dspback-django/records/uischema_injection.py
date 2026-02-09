@@ -188,6 +188,17 @@ def _mime_and_download_rule(mime_list):
     }
 
 
+def _hp_mime_rule(mime_list):
+    """Build a SHOW rule: hasPart encodingFormat in mime_list."""
+    return {
+        "effect": "SHOW",
+        "condition": {
+            "scope": "#/properties/schema:encodingFormat",
+            "schema": {"enum": mime_list},
+        },
+    }
+
+
 def _fd_ctrl(prop, label):
     """Shorthand for a fileDetail control."""
     return {
@@ -439,6 +450,8 @@ DISTRIBUTION_SCOPES = {
 }
 
 # Detail layout for hasPart items (files within archives).
+# Mirrors the distribution-level MIME-driven groups so archive contents
+# get the same file-type-specific fields.
 HAS_PART_DETAIL = {
     "type": "VerticalLayout",
     "elements": [
@@ -448,6 +461,103 @@ HAS_PART_DETAIL = {
             "type": "Control",
             "scope": "#/properties/schema:encodingFormat",
             "label": "MIME Type",
+        },
+        # Nested archive contents (zip within zip)
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:hasPart",
+            "label": "Archive Contents",
+            "options": {"elementLabelProp": "schema:name"},
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/schema:encodingFormat",
+                    "schema": {"const": "application/zip"},
+                },
+            },
+        },
+        # Image details
+        {
+            "type": "Group",
+            "label": "Image Details",
+            "rule": _hp_mime_rule(IMAGE_MIMES),
+            "elements": [
+                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("acquisitionTime", "Acquisition Time"),
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("channel1", "Channel 1"),
+                        _fd_ctrl("channel2", "Channel 2"),
+                        _fd_ctrl("channel3", "Channel 3"),
+                    ],
+                },
+                _fd_ctrl("pixelSize", "Pixel Size"),
+                _fd_ctrl("illuminationType", "Illumination Type"),
+                _fd_ctrl("imageType", "Image Type"),
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("numPixelsX", "Pixels X"),
+                        _fd_ctrl("numPixelsY", "Pixels Y"),
+                    ],
+                },
+                _fd_ctrl("spatialRegistration", "Spatial Registration"),
+            ],
+        },
+        # Tabular data details
+        {
+            "type": "Group",
+            "label": "Tabular Data Details",
+            "rule": _hp_mime_rule(TABULAR_MIMES),
+            "elements": [
+                _fd_ctrl("componentType", "Component Type"),
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("csvw:delimiter", "Delimiter"),
+                        _fd_ctrl("csvw:quoteChar", "Quote Character"),
+                        _fd_ctrl("csvw:commentPrefix", "Comment Prefix"),
+                    ],
+                },
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("csvw:header", "Has Header"),
+                        _fd_ctrl("csvw:headerRowCount", "Header Row Count"),
+                    ],
+                },
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("countRows", "Row Count"),
+                        _fd_ctrl("countColumns", "Column Count"),
+                    ],
+                },
+                _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+            ],
+        },
+        # Data cube details
+        {
+            "type": "Group",
+            "label": "Data Cube Details",
+            "rule": _hp_mime_rule(DATACUBE_MIMES),
+            "elements": [
+                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+                _fd_ctrl("dataComponentResource", "Data Component Resource"),
+            ],
+        },
+        # Document details
+        {
+            "type": "Group",
+            "label": "Document Details",
+            "rule": _hp_mime_rule(DOCUMENT_MIMES),
+            "elements": [
+                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("schema:version", "Version"),
+                _fd_ctrl("schema:isBasedOn", "Based On"),
+            ],
         },
     ],
 }
@@ -607,15 +717,16 @@ def inject_schema_defaults(schema, profile_name=None):
             "enum": mime_enum,
         }
 
-        # MIME type enum on hasPart items' encodingFormat
+        # Replace hasPart encodingFormat with single string + MIME enum
+        # (same pattern as distribution-level encodingFormat)
         has_part = dist_props.get("schema:hasPart", {})
         hp_items = has_part.get("items", {})
         hp_props = hp_items.get("properties", {})
-        hp_enc_fmt = hp_props.get("schema:encodingFormat", {})
-        if isinstance(hp_enc_fmt, dict) and hp_enc_fmt.get("type") == "array":
-            hp_enc_items = hp_enc_fmt.get("items", {})
-            if isinstance(hp_enc_items, dict):
-                hp_enc_items["enum"] = MIME_TYPE_ENUM
+        if hp_props:
+            hp_props["schema:encodingFormat"] = {
+                "type": "string",
+                "enum": mime_enum,
+            }
 
     return result
 

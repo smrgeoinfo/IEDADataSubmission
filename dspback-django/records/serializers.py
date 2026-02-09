@@ -200,6 +200,15 @@ class RecordSerializer(serializers.ModelSerializer):
                     elif isinstance(enc, str):
                         dist.pop("schema:encodingFormat", None)
 
+                    # Wrap hasPart encodingFormat strings back to arrays
+                    for part in dist.get("schema:hasPart", []):
+                        if isinstance(part, dict):
+                            hp_enc = part.get("schema:encodingFormat")
+                            if isinstance(hp_enc, str) and hp_enc:
+                                part["schema:encodingFormat"] = [hp_enc]
+                            elif isinstance(hp_enc, str):
+                                part.pop("schema:encodingFormat", None)
+
                     # Infer fileDetail @type from componentType
                     fd = dist.get("fileDetail")
                     if isinstance(fd, dict):

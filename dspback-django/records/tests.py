@@ -877,12 +877,13 @@ class SchemaDefaultsInjectionTest(TestCase):
         self.assertEqual(enc_fmt["type"], "string")
         self.assertEqual(enc_fmt["enum"], MIME_TYPE_ENUM)
 
-    def test_injects_mime_type_enum_on_has_part_encoding_format(self):
+    def test_injects_has_part_encoding_format_as_string_with_enum(self):
+        """hasPart encodingFormat is replaced with single string + MIME enum."""
         result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
         dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
-        hp_enc_items = dist_props["schema:hasPart"]["items"]["properties"]["schema:encodingFormat"]["items"]
-        self.assertIn("enum", hp_enc_items)
-        self.assertEqual(hp_enc_items["enum"], MIME_TYPE_ENUM)
+        hp_enc = dist_props["schema:hasPart"]["items"]["properties"]["schema:encodingFormat"]
+        self.assertEqual(hp_enc["type"], "string")
+        self.assertEqual(hp_enc["enum"], MIME_TYPE_ENUM)
 
     def test_schema_without_distribution_unchanged(self):
         """Distribution injection skips schemas without schema:distribution."""
@@ -1069,9 +1070,56 @@ class DistributionInjectionTest(TestCase):
         has_part = detail["elements"][5]
         hp_detail = has_part["options"]["detail"]
         self.assertEqual(hp_detail["type"], "VerticalLayout")
-        scopes = [el["scope"] for el in hp_detail["elements"]]
+        # name, description, encodingFormat, nested hasPart, 4 MIME groups
+        self.assertEqual(len(hp_detail["elements"]), 8)
+        scopes = [
+            el.get("scope") for el in hp_detail["elements"] if "scope" in el
+        ]
         self.assertIn("#/properties/schema:name", scopes)
         self.assertIn("#/properties/schema:encodingFormat", scopes)
+
+    def test_has_part_nested_archive(self):
+        """hasPart shows nested Archive Contents when encodingFormat is zip."""
+        detail = self._get_distribution_detail()
+        hp_detail = detail["elements"][5]["options"]["detail"]
+        nested_archive = hp_detail["elements"][3]
+        self.assertEqual(nested_archive["scope"], "#/properties/schema:hasPart")
+        self.assertEqual(nested_archive["label"], "Archive Contents")
+        rule_cond = nested_archive["rule"]["condition"]
+        self.assertEqual(rule_cond["schema"], {"const": "application/zip"})
+
+    def test_has_part_image_group(self):
+        detail = self._get_distribution_detail()
+        hp_detail = detail["elements"][5]["options"]["detail"]
+        image_group = hp_detail["elements"][4]
+        self.assertEqual(image_group["label"], "Image Details")
+        self.assertEqual(image_group["rule"]["effect"], "SHOW")
+        mime_cond = image_group["rule"]["condition"]
+        self.assertIn("image/tiff", mime_cond["schema"]["enum"])
+
+    def test_has_part_tabular_group(self):
+        detail = self._get_distribution_detail()
+        hp_detail = detail["elements"][5]["options"]["detail"]
+        tabular_group = hp_detail["elements"][5]
+        self.assertEqual(tabular_group["label"], "Tabular Data Details")
+        mime_cond = tabular_group["rule"]["condition"]
+        self.assertIn("text/csv", mime_cond["schema"]["enum"])
+
+    def test_has_part_datacube_group(self):
+        detail = self._get_distribution_detail()
+        hp_detail = detail["elements"][5]["options"]["detail"]
+        cube_group = hp_detail["elements"][6]
+        self.assertEqual(cube_group["label"], "Data Cube Details")
+        mime_cond = cube_group["rule"]["condition"]
+        self.assertIn("application/x-hdf5", mime_cond["schema"]["enum"])
+
+    def test_has_part_document_group(self):
+        detail = self._get_distribution_detail()
+        hp_detail = detail["elements"][5]["options"]["detail"]
+        doc_group = hp_detail["elements"][7]
+        self.assertEqual(doc_group["label"], "Document Details")
+        mime_cond = doc_group["rule"]["condition"]
+        self.assertIn("application/pdf", mime_cond["schema"]["enum"])
 
     def test_distribution_element_label_prop(self):
         result = inject_uischema(SAMPLE_UISCHEMA)
@@ -1429,3 +1477,45 @@ class SerializerDataCleanupTest(TestCase):
         attrs = serializer.validate(self._make_attrs(jsonld))
         dist = attrs["jsonld"]["schema:distribution"][0]
         self.assertEqual(dist["schema:encodingFormat"], ["text/csv"])
+
+    def test_has_part_encoding_format_wrapped(self):
+        """hasPart encodingFormat strings are wrapped to arrays on save."""
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "Archive",
+                    "_distributionType": "Data Download",
+                    "schema:encodingFormat": "application/zip",
+                    "schema:hasPart": [
+                        {"schema:name": "data.csv", "schema:encodingFormat": "text/csv"},
+                        {"schema:name": "img.tiff", "schema:encodingFormat": "image/tiff"},
+                    ],
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        parts = attrs["jsonld"]["schema:distribution"][0]["schema:hasPart"]
+        self.assertEqual(parts[0]["schema:encodingFormat"], ["text/csv"])
+        self.assertEqual(parts[1]["schema:encodingFormat"], ["image/tiff"])
+
+    def test_has_part_empty_encoding_format_removed(self):
+        """hasPart empty encodingFormat strings are removed."""
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "Archive",
+                    "_distributionType": "Data Download",
+                    "schema:encodingFormat": "application/zip",
+                    "schema:hasPart": [
+                        {"schema:name": "file", "schema:encodingFormat": ""},
+                    ],
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        part = attrs["jsonld"]["schema:distribution"][0]["schema:hasPart"][0]
+        self.assertNotIn("schema:encodingFormat", part)
