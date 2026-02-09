@@ -314,3 +314,87 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 - `OCGbuildingBlockTest/_sources/profiles/adaXRD/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
 - `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
 - `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
+
+## 2026-02-09: MIME-Type-Driven Distribution Form with Per-Profile Filtering
+
+**What changed:** Three-phase overhaul of the distribution form to fix the archive visibility bug, add MIME-type-driven field groups, and filter MIME types per technique profile.
+
+### Phase 1: Fix Archive Bug + encodingFormat Simplification
+
+**Root cause:** `schema:encodingFormat` was an array, and the archive contents SHOW rule used `{"contains": {"const": "application/zip"}}`. JSON Forms evaluates `contains` via JSON Schema validation, and empty/undefined arrays match `contains` vacuously — so Archive Contents was always visible.
+
+**Fix:** Convert `schema:encodingFormat` from array to single string at serve time. This enables simple `{"const": "application/zip"}` rule conditions.
+
+- **`uischema_injection.py`** — Changed encodingFormat injection from `{type: array, items: {enum: ...}}` to `{type: string, enum: MIME_TYPE_ENUM}`. Fixed archive rule from `{"contains": {"const": "application/zip"}}` to `{"const": "application/zip"}`.
+- **`serializers.py`** — Wraps string back to array on save (`"text/csv"` → `["text/csv"]`); empty strings are removed entirely.
+- **`catalog.ts`** — `populateOnLoad()` unwraps array to string on form load (`["text/csv"]` → `"text/csv"`).
+
+### Phase 2: fileDetail Flattening + MIME-Driven Field Groups
+
+**Problem:** `fileDetail` had `anyOf` of 9 file type schemas — JSON Forms can't render anyOf discriminators. Technique-specific fields (image channels, CSV delimiters, etc.) were invisible.
+
+**Fix:** Flatten all anyOf branches into single merged object in `convert_for_jsonforms.py`, then use UISchema SHOW rules keyed to MIME type categories to display only the relevant field group.
+
+- **`convert_for_jsonforms.py`** — Rewrote `simplify_file_detail_anyof()` to merge all 9 branches (skip `@type`, merge componentType enums via recursive `_collect_component_type_enums()`). Result: 40 merged properties, 110 unique componentType values.
+- **`uischema_injection.py`** — Added MIME category constants and 4 file-type Groups to `DISTRIBUTION_DETAIL`:
+
+  | Group | MIME trigger | Key fileDetail fields |
+  |-------|-------------|----------------------|
+  | Image Details | IMAGE_MIMES (jpeg, png, tiff, bmp, svg) | componentType, acquisitionTime, channels, pixelSize, illuminationType |
+  | Tabular Data Details | TABULAR_MIMES (csv, tsv) | componentType, csvw:delimiter/quoteChar/header, countRows/Columns, physicalMapping |
+  | Data Cube Details | DATACUBE_MIMES (hdf5, netcdf) | componentType, physicalMapping, dataComponentResource |
+  | Document Details | DOCUMENT_MIMES (pdf, txt, html, md, rtf, docx) | componentType, schema:version, schema:isBasedOn |
+
+  Each group uses an AND rule: `_distributionType == "Data Download"` AND `encodingFormat in [MIME list]`. The `enum` condition pattern works because JSON Forms evaluates rules via JSON Schema validation.
+
+- **`serializers.py`** — Added fileDetail `@type` inference from componentType on save. Lookup tables `_FILE_TYPE_PREFIXES` (exact match) and `_FILE_TYPE_PREFIX_RULES` (prefix fallback) map componentType strings to `[ada:type, schema:Type]` pairs. E.g., `ada:EMPAImage` → `["ada:imageMap", "schema:ImageObject"]`.
+
+### Phase 3: Per-Profile MIME Type Filtering
+
+**Problem:** All MIME types appeared in the dropdown regardless of which technique profile was selected, even though each technique only supports specific file types.
+
+**Fix:** Added profile→file-types→MIME-types mapping in `uischema_injection.py`:
+
+```python
+PROFILE_FILE_TYPES = {
+    "adaProduct": "all",  # sentinel: returns full MIME_TYPE_ENUM
+    "adaEMPA": ["imageMap", "image", "tabularData", "collection", "supDocImage", "document"],
+    "adaXRD": ["tabularData", "image", "document"],
+    "adaICPMS": ["tabularData", "collection", "document"],
+    "adaVNMIR": ["tabularData", "imageMap", "dataCube", "supDocImage", "document"],
+}
+FILE_TYPE_TO_MIMES = {
+    "image": IMAGE_MIMES, "imageMap": IMAGE_MIMES, "supDocImage": IMAGE_MIMES,
+    "tabularData": TABULAR_MIMES, "dataCube": DATACUBE_MIMES,
+    "document": DOCUMENT_MIMES, "collection": ARCHIVE_MIMES,
+}
+```
+
+- `_get_profile_mime_enum(profile_name)` collects MIME types for the profile's file types, then adds ARCHIVE_MIMES and STRUCTURED_DATA_MIMES (always available).
+- `inject_schema_defaults(schema, profile_name=None)` now accepts profile name and filters the enum.
+- `ProfileSerializer.to_representation()` passes `instance.name` to `inject_schema_defaults()`.
+
+**Files changed:**
+- `dspback-django/records/uischema_injection.py` — encodingFormat→string, archive rule fix, MIME categories, fileDetail Groups, per-profile filtering
+- `dspback-django/records/serializers.py` — encodingFormat wrap/unwrap, fileDetail @type inference, profile_name passthrough
+- `dspfront/src/services/catalog.ts` — encodingFormat array→string unwrap in populateOnLoad()
+- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Flatten fileDetail anyOf into merged object
+- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
+- `dspback-django/records/tests.py` — 123 tests (up from 99)
+
+## 2026-02-09: MIME-Driven Groups in hasPart (Archive Contents)
+
+**What changed:** Extended the MIME-type-driven field groups from distribution items to hasPart items (files within archives). Archive member files now show the same technique-specific field groups (Image Details, Tabular Data Details, Data Cube Details, Document Details) based on the selected MIME type.
+
+**Implementation:**
+- Added `_hp_mime_rule(mime_list)` helper — simpler than distribution-level rules because hasPart items don't need the `_distributionType == "Data Download"` AND condition (they're always data files).
+- Expanded `HAS_PART_DETAIL` from 3 elements (name, description, MIME type) to 8 elements: name, description, MIME type, nested archive contents (for archives-in-archives), Image Details group, Tabular Data Details group, Data Cube Details group, Document Details group.
+- hasPart `schema:encodingFormat` also converted from array to string (same serve-time injection pattern as distribution).
+- Serializer wraps hasPart encodingFormat strings back to arrays on save (same pattern).
+- Frontend `populateOnLoad()` unwraps hasPart encodingFormat arrays to strings on load.
+
+**Files changed:**
+- `dspback-django/records/uischema_injection.py` — `_hp_mime_rule()`, expanded `HAS_PART_DETAIL` with 4 file-type groups + nested archive contents
+- `dspback-django/records/serializers.py` — hasPart encodingFormat string→array wrap on save
+- `dspfront/src/services/catalog.ts` — hasPart encodingFormat array→string unwrap in `populateOnLoad()`
+- `dspback-django/records/tests.py` — 130 tests (up from 123): `test_has_part_nested_archive`, `test_has_part_image_group`, `test_has_part_tabular_group`, `test_has_part_datacube_group`, `test_has_part_document_group`, `test_has_part_encoding_format_wrapped`, `test_has_part_empty_encoding_format_removed`
