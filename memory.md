@@ -254,11 +254,20 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 
 **Key finding:** `fetchBBlock()` in `bblock.service.js` loads full bblock data from a separate `json-full` URL and only copies `COPY_PROPERTIES` from the register entry. Any custom properties added to `register.json` must be added to this whitelist or they'll be silently dropped.
 
+**deploy-viewer workflow:** The OGC postprocessor deploys GitHub Pages with the upstream bblocks-viewer (which lacks the Resolved JSON button) and a `register.json` without `resolvedSchema` URLs. A new `deploy-viewer.yml` workflow re-deploys Pages after the postprocessor completes, with three additions:
+1. Runs `augment_register.py` to inject `resolvedSchema` URLs into `register.json`
+2. Generates `config.js` pointing to the local register (the postprocessor generates this in-memory during its deploy but doesn't commit it)
+3. Generates `index.html` loading assets from the `smrgeoinfo/bblocks-viewer` fork instead of upstream `ogcincubator/bblocks-viewer`
+
+The workflow chain is: push → "Validate and process Building Blocks" (OGC postprocessor) → triggers both "Generate JSON Forms schemas" and "Deploy custom bblocks-viewer".
+
 **Files changed:**
 - `OCGbuildingBlockTest/tools/augment_register.py` — New script
 - `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — Added augment step + register.json staging
+- `OCGbuildingBlockTest/.github/workflows/deploy-viewer.yml` — New workflow: re-deploys Pages with custom viewer + augmented register
 - `OCGbuildingBlockTest/tools/cors_server.py` — Added directory argument
 - `OCGbuildingBlockTest/build/register.json` — 6 profile bblocks now have `resolvedSchema` URLs
+- `smrgeoinfo/bblocks-viewer` (GitHub fork) — Fork of `ogcincubator/bblocks-viewer` with Resolved (JSON) button; deployed to GitHub Pages at `smrgeoinfo.github.io/bblocks-viewer/`
 - `/tmp/bblocks-viewer/src/components/bblock/JsonSchemaViewer.vue` — Added Resolved (JSON) button
 - `/tmp/bblocks-viewer/src/services/bblock.service.js` — Added `resolvedSchema` to COPY_PROPERTIES
 
