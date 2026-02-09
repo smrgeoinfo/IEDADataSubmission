@@ -18,6 +18,10 @@ PERSON_SCOPES = {
     "#/properties/schema:subjectOf/properties/schema:maintainer",
 }
 
+MAINTAINER_SCOPES = {
+    "#/properties/schema:subjectOf/properties/schema:maintainer",
+}
+
 ORG_ARRAY_SCOPES = {
     "#/properties/schema:provider",
 }
@@ -87,6 +91,196 @@ MIME_TYPE_OPTIONS = [
 # CzForm doesn't render oneOf on primitive strings as a searchable dropdown,
 # so we use enum instead.  MIME_TYPE_OPTIONS is kept for reference/tests.
 MIME_TYPE_ENUM = [opt["const"] for opt in MIME_TYPE_OPTIONS]
+
+# ---------------------------------------------------------------------------
+# MIME type category groupings for file-type-specific field display
+# ---------------------------------------------------------------------------
+
+IMAGE_MIMES = ["image/jpeg", "image/png", "image/tiff", "image/bmp", "image/svg+xml"]
+TABULAR_MIMES = ["text/csv", "text/tab-separated-values"]
+DATACUBE_MIMES = ["application/x-hdf5", "application/x-netcdf"]
+DOCUMENT_MIMES = [
+    "application/pdf", "text/plain", "text/html", "text/markdown",
+    "application/rtf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]
+ARCHIVE_MIMES = ["application/zip"]
+STRUCTURED_DATA_MIMES = [
+    "application/json", "application/ld+json", "application/xml", "application/yaml",
+]
+SPREADSHEET_MIMES = [
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]
+MODEL_MIMES = ["model/obj", "model/stl"]
+VIDEO_MIMES = ["video/mp4", "video/quicktime"]
+
+# ---------------------------------------------------------------------------
+# Per-profile MIME type filtering
+# ---------------------------------------------------------------------------
+
+# File type → MIME types mapping
+FILE_TYPE_TO_MIMES = {
+    "image": IMAGE_MIMES,
+    "imageMap": IMAGE_MIMES,
+    "tabularData": TABULAR_MIMES,
+    "dataCube": DATACUBE_MIMES,
+    "document": DOCUMENT_MIMES,
+    "collection": ARCHIVE_MIMES,
+    "supDocImage": IMAGE_MIMES,
+    "otherFileType": MODEL_MIMES + VIDEO_MIMES,
+}
+
+# Profile → supported file types (which drive the MIME dropdown options)
+# adaProduct supports all file types; technique profiles support subsets.
+PROFILE_FILE_TYPES = {
+    "adaProduct": "all",
+    "adaEMPA": ["imageMap", "image", "tabularData", "collection", "supDocImage", "document"],
+    "adaXRD": ["tabularData", "image", "document"],
+    "adaICPMS": ["tabularData", "collection", "document"],
+    "adaVNMIR": ["tabularData", "imageMap", "dataCube", "supDocImage", "document"],
+}
+
+
+def _get_profile_mime_enum(profile_name):
+    """Return the filtered MIME enum for a profile, or full list if unknown.
+
+    adaProduct and unknown/unset profiles get the complete MIME list.
+    Technique profiles get a filtered list based on their supported file types,
+    plus structured data formats (JSON, XML, YAML) always included.
+    """
+    if not profile_name or profile_name not in PROFILE_FILE_TYPES:
+        return MIME_TYPE_ENUM
+
+    file_types = PROFILE_FILE_TYPES[profile_name]
+
+    # "all" sentinel means no filtering
+    if file_types == "all":
+        return MIME_TYPE_ENUM
+
+    allowed = set()
+    for ft in file_types:
+        allowed.update(FILE_TYPE_TO_MIMES.get(ft, []))
+    # Always include structured data formats (JSON, XML, YAML) for all profiles
+    allowed.update(STRUCTURED_DATA_MIMES)
+
+    # Return in the same order as the master list
+    return [m for m in MIME_TYPE_ENUM if m in allowed]
+
+
+def _mime_and_download_rule(mime_list):
+    """Build an AND rule: _distributionType == 'Data Download' AND encodingFormat in mime_list."""
+    return {
+        "effect": "SHOW",
+        "condition": {
+            "type": "AND",
+            "conditions": [
+                {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Data Download"},
+                },
+                {
+                    "scope": "#/properties/schema:encodingFormat",
+                    "schema": {"enum": mime_list},
+                },
+            ],
+        },
+    }
+
+
+def _fd_ctrl(prop, label):
+    """Shorthand for a fileDetail control."""
+    return {
+        "type": "Control",
+        "scope": f"#/properties/fileDetail/properties/{prop}",
+        "label": label,
+    }
+
+
+# File-type Groups shown inside DISTRIBUTION_DETAIL based on MIME selection.
+
+IMAGE_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Image Details",
+    "rule": _mime_and_download_rule(IMAGE_MIMES),
+    "elements": [
+        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("acquisitionTime", "Acquisition Time"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _fd_ctrl("channel1", "Channel 1"),
+                _fd_ctrl("channel2", "Channel 2"),
+                _fd_ctrl("channel3", "Channel 3"),
+            ],
+        },
+        _fd_ctrl("pixelSize", "Pixel Size"),
+        _fd_ctrl("illuminationType", "Illumination Type"),
+        _fd_ctrl("imageType", "Image Type"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _fd_ctrl("numPixelsX", "Pixels X"),
+                _fd_ctrl("numPixelsY", "Pixels Y"),
+            ],
+        },
+        _fd_ctrl("spatialRegistration", "Spatial Registration"),
+    ],
+}
+
+TABULAR_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Tabular Data Details",
+    "rule": _mime_and_download_rule(TABULAR_MIMES),
+    "elements": [
+        _fd_ctrl("componentType", "Component Type"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _fd_ctrl("csvw:delimiter", "Delimiter"),
+                _fd_ctrl("csvw:quoteChar", "Quote Character"),
+                _fd_ctrl("csvw:commentPrefix", "Comment Prefix"),
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _fd_ctrl("csvw:header", "Has Header"),
+                _fd_ctrl("csvw:headerRowCount", "Header Row Count"),
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _fd_ctrl("countRows", "Row Count"),
+                _fd_ctrl("countColumns", "Column Count"),
+            ],
+        },
+        _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+    ],
+}
+
+DATACUBE_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Data Cube Details",
+    "rule": _mime_and_download_rule(DATACUBE_MIMES),
+    "elements": [
+        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+        _fd_ctrl("dataComponentResource", "Data Component Resource"),
+    ],
+}
+
+DOCUMENT_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Document Details",
+    "rule": _mime_and_download_rule(DOCUMENT_MIMES),
+    "elements": [
+        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("schema:version", "Version"),
+        _fd_ctrl("schema:isBasedOn", "Based On"),
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Variable panel progressive disclosure
@@ -319,12 +513,18 @@ DISTRIBUTION_DETAIL = {
                         },
                         {
                             "scope": "#/properties/schema:encodingFormat",
-                            "schema": {"contains": {"const": "application/zip"}},
+                            "schema": {"const": "application/zip"},
                         },
                     ],
                 },
             },
         },
+        # --- File-type detail groups (shown based on MIME type) ---
+        IMAGE_DETAIL_GROUP,
+        TABULAR_DETAIL_GROUP,
+        DATACUBE_DETAIL_GROUP,
+        DOCUMENT_DETAIL_GROUP,
+        # --- Web API fields ---
         {
             "type": "Control",
             "scope": "#/properties/schema:serviceType",
@@ -357,12 +557,12 @@ DISTRIBUTION_DETAIL = {
 # Schema defaults injection
 # ---------------------------------------------------------------------------
 
-def inject_schema_defaults(schema):
+def inject_schema_defaults(schema, profile_name=None):
     """Add default values and injected properties at serve time.
 
     - variableMeasured items: @type default, _showAdvanced boolean
     - distribution items: _distributionType enum, WebAPI properties
-    - encodingFormat: enum for MIME type selection
+    - encodingFormat: enum for MIME type selection (filtered per profile)
     """
     result = copy.deepcopy(schema)
 
@@ -397,12 +597,15 @@ def inject_schema_defaults(schema):
         dist_props.setdefault("schema:serviceType", {"type": "string"})
         dist_props.setdefault("schema:documentation", {"type": "string", "format": "uri"})
 
-        # MIME type enum on distribution encodingFormat
-        enc_fmt = dist_props.get("schema:encodingFormat", {})
-        if isinstance(enc_fmt, dict) and enc_fmt.get("type") == "array":
-            enc_fmt_items = enc_fmt.get("items", {})
-            if isinstance(enc_fmt_items, dict):
-                enc_fmt_items["enum"] = MIME_TYPE_ENUM
+        # Replace array encodingFormat with single string + MIME enum.
+        # A distribution item describes one file with one MIME type;
+        # single string enables simple {"const": "text/csv"} rule conditions.
+        # The serializer wraps back to array on save.
+        mime_enum = _get_profile_mime_enum(profile_name)
+        dist_props["schema:encodingFormat"] = {
+            "type": "string",
+            "enum": mime_enum,
+        }
 
         # MIME type enum on hasPart items' encodingFormat
         has_part = dist_props.get("schema:hasPart", {})
@@ -421,14 +624,14 @@ def inject_schema_defaults(schema):
 # UISchema injection
 # ---------------------------------------------------------------------------
 
-def inject_uischema(uischema):
+def inject_uischema(uischema, person_names=None):
     """Deep-copy uischema and inject layout configs on matching controls."""
     result = copy.deepcopy(uischema)
-    _walk(result)
+    _walk(result, person_names=person_names)
     return result
 
 
-def _walk(node):
+def _walk(node, person_names=None):
     """Recursively walk the UISchema tree and inject configs on matching controls."""
     if not isinstance(node, dict):
         return
@@ -447,6 +650,10 @@ def _walk(node):
             options = node.setdefault("options", {})
             options["vocabulary"] = copy.deepcopy(ORG_VOCABULARY)
 
+    # --- Maintainer name suggestions ---
+    if scope in MAINTAINER_SCOPES and person_names:
+        _inject_maintainer_suggestions(node, person_names)
+
     # --- Variable panel progressive disclosure ---
     if scope in VARIABLE_MEASURED_SCOPES:
         options = node.setdefault("options", {})
@@ -461,16 +668,36 @@ def _walk(node):
 
     # Recurse into child nodes
     for child in node.get("elements", []):
-        _walk(child)
+        _walk(child, person_names=person_names)
 
     # Recurse into detail (used by array controls)
     detail = node.get("detail")
     if isinstance(detail, dict):
-        _walk(detail)
+        _walk(detail, person_names=person_names)
 
     # Recurse into options.detail
     options = node.get("options")
     if isinstance(options, dict):
         options_detail = options.get("detail")
         if isinstance(options_detail, dict):
-            _walk(options_detail)
+            _walk(options_detail, person_names=person_names)
+
+
+def _inject_maintainer_suggestions(node, person_names):
+    """Add person name suggestions to the maintainer's name control in its detail layout."""
+    options = node.get("options", {})
+    detail = options.get("detail", {})
+    _inject_name_suggestion_in_elements(detail.get("elements", []), person_names)
+
+
+def _inject_name_suggestion_in_elements(elements, person_names):
+    """Walk elements (possibly nested in layouts) and add suggestion to the schema:name control."""
+    for element in elements:
+        if not isinstance(element, dict):
+            continue
+        if element.get("scope") == "#/properties/schema:name":
+            elem_options = element.setdefault("options", {})
+            elem_options["suggestion"] = person_names
+            return
+        # Recurse into nested layout elements (e.g., HorizontalLayout)
+        _inject_name_suggestion_in_elements(element.get("elements", []), person_names)

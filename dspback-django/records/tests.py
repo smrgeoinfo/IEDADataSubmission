@@ -12,8 +12,13 @@ from rest_framework.test import APIClient
 from records.models import KnownOrganization, KnownPerson, Profile, Record
 from records.services import extract_known_entities, upsert_known_entities
 from records.uischema_injection import (
+    DATACUBE_MIMES,
+    DOCUMENT_MIMES,
+    IMAGE_MIMES,
     MIME_TYPE_ENUM,
     MIME_TYPE_OPTIONS,
+    TABULAR_MIMES,
+    _get_profile_mime_enum,
     inject_schema_defaults,
     inject_uischema,
 )
@@ -598,6 +603,58 @@ class VocabularyInjectionEnabledTest(TestCase):
         self.assertTrue(vocab["value"]["schema:identifier"]["hidden"])
 
 
+class MaintainerSuggestionTest(TestCase):
+    """Test that person name suggestions are injected into the maintainer's name control."""
+
+    UISCHEMA_WITH_MAINTAINER_DETAIL = {
+        "type": "VerticalLayout",
+        "elements": [
+            {
+                "type": "Control",
+                "scope": "#/properties/schema:subjectOf/properties/schema:maintainer",
+                "label": "Maintainer",
+                "options": {
+                    "detail": {
+                        "type": "HorizontalLayout",
+                        "elements": [
+                            {"type": "Control", "scope": "#/properties/@type", "label": "Type"},
+                            {"type": "Control", "scope": "#/properties/schema:name", "label": "Name"},
+                        ],
+                    }
+                },
+            }
+        ],
+    }
+
+    def test_suggestion_injected_on_name_control(self):
+        names = ["Alice Smith", "Bob Jones"]
+        result = inject_uischema(self.UISCHEMA_WITH_MAINTAINER_DETAIL, person_names=names)
+        maintainer = result["elements"][0]
+        name_ctrl = maintainer["options"]["detail"]["elements"][1]
+        self.assertEqual(name_ctrl["scope"], "#/properties/schema:name")
+        self.assertEqual(name_ctrl["options"]["suggestion"], names)
+
+    def test_no_suggestion_when_no_names(self):
+        result = inject_uischema(self.UISCHEMA_WITH_MAINTAINER_DETAIL, person_names=None)
+        maintainer = result["elements"][0]
+        name_ctrl = maintainer["options"]["detail"]["elements"][1]
+        self.assertNotIn("options", name_ctrl)
+
+    def test_no_suggestion_when_empty_names(self):
+        result = inject_uischema(self.UISCHEMA_WITH_MAINTAINER_DETAIL, person_names=[])
+        maintainer = result["elements"][0]
+        name_ctrl = maintainer["options"]["detail"]["elements"][1]
+        self.assertNotIn("options", name_ctrl)
+
+    def test_no_crash_without_detail(self):
+        """Maintainer control without detail layout should not crash."""
+        result = inject_uischema(SAMPLE_UISCHEMA, person_names=["Alice"])
+        group = result["elements"][2]
+        maintainer = group["elements"][0]
+        # No detail, so no suggestion injected — just verify no error
+        self.assertEqual(maintainer["scope"], "#/properties/schema:subjectOf/properties/schema:maintainer")
+
+
 class VariablePanelInjectionTest(TestCase):
     def _get_variable_detail(self):
         result = inject_uischema(SAMPLE_UISCHEMA)
@@ -812,12 +869,13 @@ class SchemaDefaultsInjectionTest(TestCase):
         self.assertIn("schema:documentation", dist_props)
         self.assertEqual(dist_props["schema:documentation"]["format"], "uri")
 
-    def test_injects_mime_type_enum_on_encoding_format(self):
+    def test_injects_encoding_format_as_string_with_enum(self):
+        """encodingFormat is replaced with a single string + MIME enum at serve time."""
         result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
         dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
-        enc_items = dist_props["schema:encodingFormat"]["items"]
-        self.assertIn("enum", enc_items)
-        self.assertEqual(enc_items["enum"], MIME_TYPE_ENUM)
+        enc_fmt = dist_props["schema:encodingFormat"]
+        self.assertEqual(enc_fmt["type"], "string")
+        self.assertEqual(enc_fmt["enum"], MIME_TYPE_ENUM)
 
     def test_injects_mime_type_enum_on_has_part_encoding_format(self):
         result = inject_schema_defaults(DISTRIBUTION_SCHEMA)
@@ -946,8 +1004,10 @@ class DistributionInjectionTest(TestCase):
     def test_distribution_detail_injected(self):
         detail = self._get_distribution_detail()
         self.assertEqual(detail["type"], "VerticalLayout")
-        # _distributionType, name, description, contentUrl, encodingFormat, hasPart, serviceType, documentation
-        self.assertEqual(len(detail["elements"]), 8)
+        # _distributionType, name, description, contentUrl, encodingFormat, hasPart,
+        # 4 file-type groups (image, tabular, datacube, document),
+        # serviceType, documentation
+        self.assertEqual(len(detail["elements"]), 12)
 
     def test_distribution_type_selector(self):
         detail = self._get_distribution_detail()
@@ -985,21 +1045,21 @@ class DistributionInjectionTest(TestCase):
         self.assertEqual(len(conditions), 2)
         # First condition: _distributionType == "Data Download"
         self.assertEqual(conditions[0]["schema"], {"const": "Data Download"})
-        # Second condition: encodingFormat contains "application/zip"
+        # Second condition: encodingFormat == "application/zip" (string const)
         self.assertEqual(
-            conditions[1]["schema"], {"contains": {"const": "application/zip"}}
+            conditions[1]["schema"], {"const": "application/zip"}
         )
 
     def test_service_type_has_webapi_rule(self):
         detail = self._get_distribution_detail()
-        svc = detail["elements"][6]
+        svc = detail["elements"][10]
         self.assertEqual(svc["scope"], "#/properties/schema:serviceType")
         self.assertEqual(svc["rule"]["effect"], "SHOW")
         self.assertEqual(svc["rule"]["condition"]["schema"], {"const": "Web API"})
 
     def test_documentation_has_webapi_rule(self):
         detail = self._get_distribution_detail()
-        doc = detail["elements"][7]
+        doc = detail["elements"][11]
         self.assertEqual(doc["scope"], "#/properties/schema:documentation")
         self.assertEqual(doc["rule"]["effect"], "SHOW")
         self.assertEqual(doc["rule"]["condition"]["schema"], {"const": "Web API"})
@@ -1017,6 +1077,113 @@ class DistributionInjectionTest(TestCase):
         result = inject_uischema(SAMPLE_UISCHEMA)
         dist_ctrl = result["elements"][6]["elements"][0]
         self.assertEqual(dist_ctrl["options"]["elementLabelProp"], "schema:name")
+
+    def test_image_detail_group(self):
+        detail = self._get_distribution_detail()
+        image_group = detail["elements"][6]
+        self.assertEqual(image_group["type"], "Group")
+        self.assertEqual(image_group["label"], "Image Details")
+        rule = image_group["rule"]
+        self.assertEqual(rule["effect"], "SHOW")
+        self.assertEqual(rule["condition"]["type"], "AND")
+        # MIME condition uses enum of image types
+        mime_cond = rule["condition"]["conditions"][1]
+        self.assertEqual(mime_cond["scope"], "#/properties/schema:encodingFormat")
+        self.assertIn("image/tiff", mime_cond["schema"]["enum"])
+
+    def test_tabular_detail_group(self):
+        detail = self._get_distribution_detail()
+        tabular_group = detail["elements"][7]
+        self.assertEqual(tabular_group["label"], "Tabular Data Details")
+        mime_cond = tabular_group["rule"]["condition"]["conditions"][1]
+        self.assertIn("text/csv", mime_cond["schema"]["enum"])
+
+    def test_datacube_detail_group(self):
+        detail = self._get_distribution_detail()
+        cube_group = detail["elements"][8]
+        self.assertEqual(cube_group["label"], "Data Cube Details")
+        mime_cond = cube_group["rule"]["condition"]["conditions"][1]
+        self.assertIn("application/x-hdf5", mime_cond["schema"]["enum"])
+
+    def test_document_detail_group(self):
+        detail = self._get_distribution_detail()
+        doc_group = detail["elements"][9]
+        self.assertEqual(doc_group["label"], "Document Details")
+        mime_cond = doc_group["rule"]["condition"]["conditions"][1]
+        self.assertIn("application/pdf", mime_cond["schema"]["enum"])
+
+    def test_file_detail_groups_use_nested_scope(self):
+        """File-type groups reference fileDetail properties with nested scope."""
+        detail = self._get_distribution_detail()
+        image_group = detail["elements"][6]
+        first_ctrl = image_group["elements"][0]
+        self.assertTrue(
+            first_ctrl["scope"].startswith("#/properties/fileDetail/properties/")
+        )
+
+
+# ===================================================================
+# fileDetail @type inference tests
+# ===================================================================
+
+
+class FileDetailTypeInferenceTest(TestCase):
+    """Test that serializer infers fileDetail.@type from componentType."""
+
+    def setUp(self):
+        self.profile = Profile.objects.create(name="inferTest", schema={})
+
+    def _make_attrs(self, jsonld):
+        return {"jsonld": jsonld, "profile": self.profile}
+
+    def test_infers_image_type(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [{
+                "schema:name": "img",
+                "_distributionType": "Data Download",
+                "schema:encodingFormat": "image/tiff",
+                "fileDetail": {
+                    "componentType": {"@type": "ada:AIVAImage"},
+                },
+            }],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
+        self.assertEqual(fd["@type"], ["ada:image", "schema:ImageObject"])
+
+    def test_infers_tabular_by_prefix(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [{
+                "schema:name": "tab",
+                "_distributionType": "Data Download",
+                "schema:encodingFormat": "text/csv",
+                "fileDetail": {
+                    "componentType": {"@type": "ada:LAFTabular"},
+                },
+            }],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
+        self.assertEqual(fd["@type"], ["ada:tabularData", "schema:Dataset"])
+
+    def test_no_inference_without_component_type(self):
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [{
+                "schema:name": "bare",
+                "_distributionType": "Data Download",
+                "schema:encodingFormat": "text/csv",
+                "fileDetail": {},
+            }],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
+        self.assertNotIn("@type", fd)
 
 
 # ===================================================================
@@ -1049,6 +1216,71 @@ class MimeTypeOptionsTest(TestCase):
     def test_options_sorted_by_const(self):
         consts = [o["const"] for o in MIME_TYPE_OPTIONS]
         self.assertEqual(consts, sorted(consts))
+
+
+# ===================================================================
+# Per-profile MIME type filtering tests
+# ===================================================================
+
+
+class ProfileMimeFilterTest(TestCase):
+    """Test that MIME type dropdowns are filtered per technique profile."""
+
+    def test_ada_product_gets_all_mimes(self):
+        mimes = _get_profile_mime_enum("adaProduct")
+        self.assertEqual(mimes, MIME_TYPE_ENUM)
+
+    def test_unknown_profile_gets_all_mimes(self):
+        mimes = _get_profile_mime_enum("unknownProfile")
+        self.assertEqual(mimes, MIME_TYPE_ENUM)
+
+    def test_none_profile_gets_all_mimes(self):
+        mimes = _get_profile_mime_enum(None)
+        self.assertEqual(mimes, MIME_TYPE_ENUM)
+
+    def test_ada_xrd_has_csv_and_images(self):
+        mimes = _get_profile_mime_enum("adaXRD")
+        self.assertIn("text/csv", mimes)
+        self.assertIn("image/tiff", mimes)
+        self.assertIn("application/pdf", mimes)
+        # XRD doesn't support data cubes
+        self.assertNotIn("application/x-hdf5", mimes)
+        self.assertNotIn("application/x-netcdf", mimes)
+
+    def test_ada_vnmir_has_datacube(self):
+        mimes = _get_profile_mime_enum("adaVNMIR")
+        self.assertIn("application/x-hdf5", mimes)
+        self.assertIn("application/x-netcdf", mimes)
+        self.assertIn("text/csv", mimes)
+
+    def test_ada_icpms_has_tabular_and_collection(self):
+        mimes = _get_profile_mime_enum("adaICPMS")
+        self.assertIn("text/csv", mimes)
+        self.assertIn("application/zip", mimes)
+        # ICPMS doesn't support images directly
+        self.assertNotIn("image/tiff", mimes)
+
+    def test_all_profiles_include_structured_data(self):
+        """JSON, XML, YAML are always available regardless of profile."""
+        for profile in ["adaXRD", "adaICPMS", "adaVNMIR", "adaEMPA"]:
+            mimes = _get_profile_mime_enum(profile)
+            self.assertIn("application/json", mimes, f"Missing JSON for {profile}")
+            self.assertIn("application/xml", mimes, f"Missing XML for {profile}")
+            self.assertIn("application/yaml", mimes, f"Missing YAML for {profile}")
+
+    def test_filtered_enum_preserves_sort_order(self):
+        """Filtered MIME list maintains the same order as the master list."""
+        mimes = _get_profile_mime_enum("adaXRD")
+        master_order = [m for m in MIME_TYPE_ENUM if m in mimes]
+        self.assertEqual(mimes, master_order)
+
+    def test_inject_schema_defaults_uses_profile(self):
+        """inject_schema_defaults with profile_name filters the MIME enum."""
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA, profile_name="adaXRD")
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        enc_fmt = dist_props["schema:encodingFormat"]
+        self.assertIn("text/csv", enc_fmt["enum"])
+        self.assertNotIn("application/x-hdf5", enc_fmt["enum"])
 
 
 # ===================================================================
@@ -1146,3 +1378,54 @@ class SerializerDataCleanupTest(TestCase):
         attrs = serializer.validate(self._make_attrs(jsonld))
         dist = attrs["jsonld"]["schema:distribution"][0]
         self.assertEqual(dist["@type"], ["schema:WebAPI"])
+
+    def test_encoding_format_string_wrapped_to_array(self):
+        """Single string encodingFormat is wrapped back to array for JSON-LD."""
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "File",
+                    "_distributionType": "Data Download",
+                    "schema:encodingFormat": "text/csv",
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["schema:encodingFormat"], ["text/csv"])
+
+    def test_encoding_format_empty_string_removed(self):
+        """Empty string encodingFormat is removed entirely."""
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "File",
+                    "_distributionType": "Data Download",
+                    "schema:encodingFormat": "",
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertNotIn("schema:encodingFormat", dist)
+
+    def test_encoding_format_array_preserved(self):
+        """Array encodingFormat (already correct) is left as-is."""
+        from records.serializers import RecordSerializer
+        jsonld = {
+            "schema:distribution": [
+                {
+                    "schema:name": "File",
+                    "_distributionType": "Data Download",
+                    "schema:encodingFormat": ["text/csv"],
+                },
+            ],
+        }
+        serializer = RecordSerializer()
+        attrs = serializer.validate(self._make_attrs(jsonld))
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["schema:encodingFormat"], ["text/csv"])

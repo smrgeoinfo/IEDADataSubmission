@@ -7,6 +7,69 @@ from records.services import extract_indexed_fields, upsert_known_entities
 from records.uischema_injection import inject_schema_defaults, inject_uischema
 from records.validators import validate_record
 
+# ---------------------------------------------------------------------------
+# fileDetail @type inference from componentType
+# ---------------------------------------------------------------------------
+# componentType enum values are disjoint across file types, so we can build
+# a reverse lookup to infer the correct fileDetail @type from componentType.
+
+# Maps componentType @type prefix → fileDetail @type values
+_FILE_TYPE_PREFIXES = {
+    # image componentTypes (ada:*Image, ada:*Pattern, ada:ShapeModel*)
+    "ada:AIVAImage": ["ada:image", "schema:ImageObject"],
+    "ada:LITImage": ["ada:image", "schema:ImageObject"],
+    "ada:STEMImage": ["ada:image", "schema:ImageObject"],
+    "ada:TEMImage": ["ada:image", "schema:ImageObject"],
+    "ada:UVFMImage": ["ada:image", "schema:ImageObject"],
+    "ada:VLMImage": ["ada:image", "schema:ImageObject"],
+    "ada:XRDDiffractionPattern": ["ada:image", "schema:ImageObject"],
+    "ada:ShapeModelImage": ["ada:image", "schema:ImageObject"],
+    # imageMap componentTypes
+    "ada:basemap": ["ada:imageMap", "schema:ImageObject"],
+    "ada:supplementalBasemap": ["ada:imageMap", "schema:ImageObject"],
+    # tabularData componentTypes
+    "ada:DSCTabular": ["ada:tabularData", "schema:Dataset"],
+    "ada:EAIRMSTabular": ["ada:tabularData", "schema:Dataset"],
+    "ada:ICPMSTabular": ["ada:tabularData", "schema:Dataset"],
+    "ada:XRDTabular": ["ada:tabularData", "schema:Dataset"],
+    # dataCube componentTypes
+    "ada:VNMIRCube": ["ada:dataCube", "schema:Dataset"],
+    "ada:L2MSCube": ["ada:dataCube", "schema:Dataset"],
+    # document componentTypes
+    "ada:TechnicalReport": ["ada:document", "schema:DigitalDocument"],
+    "ada:DataDictionary": ["ada:document", "schema:DigitalDocument"],
+    # collection componentTypes
+    "ada:SEMImageCollection": ["ada:collection", "https://schema.org/Collection"],
+    "ada:TEMEDSImageCollection": ["ada:collection", "https://schema.org/Collection"],
+}
+
+# Broad prefix-based fallbacks for componentTypes not explicitly listed
+_FILE_TYPE_PREFIX_RULES = [
+    ("ada:EMPA", ["ada:imageMap", "schema:ImageObject"]),
+    ("ada:SEM", ["ada:imageMap", "schema:ImageObject"]),
+    ("ada:NanoSIMS", ["ada:imageMap", "schema:ImageObject"]),
+    ("ada:XANES", ["ada:image", "schema:ImageObject"]),
+    ("ada:NanoIR", ["ada:imageMap", "schema:ImageObject"]),
+    ("ada:VNMIR", ["ada:dataCube", "schema:Dataset"]),
+    ("ada:L2MS", ["ada:dataCube", "schema:Dataset"]),
+    ("ada:PSFD", ["ada:tabularData", "schema:Dataset"]),
+    ("ada:LAF", ["ada:tabularData", "schema:Dataset"]),
+]
+
+
+def _infer_file_detail_type(component_type_value):
+    """Infer fileDetail @type from a componentType @type string."""
+    if not component_type_value:
+        return None
+    # Exact match first
+    if component_type_value in _FILE_TYPE_PREFIXES:
+        return _FILE_TYPE_PREFIXES[component_type_value]
+    # Prefix-based fallback
+    for prefix, ft in _FILE_TYPE_PREFIX_RULES:
+        if component_type_value.startswith(prefix):
+            return ft
+    return None
+
 
 class ProfileSerializer(serializers.ModelSerializer):
     base_profile = serializers.SlugRelatedField(
@@ -34,10 +97,23 @@ class ProfileSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+
+        # Fetch person names for maintainer autocomplete suggestions
+        person_names = None
+        try:
+            from records.models import KnownPerson
+            person_names = list(
+                KnownPerson.objects.values_list("name", flat=True)
+                .distinct()
+                .order_by("name")[:100]
+            )
+        except Exception:
+            pass
+
         if data.get("uischema"):
-            data["uischema"] = inject_uischema(data["uischema"])
+            data["uischema"] = inject_uischema(data["uischema"], person_names=person_names)
         if data.get("schema"):
-            data["schema"] = inject_schema_defaults(data["schema"])
+            data["schema"] = inject_schema_defaults(data["schema"], profile_name=instance.name)
         return data
 
 
@@ -116,6 +192,23 @@ class RecordSerializer(serializers.ModelSerializer):
                         dist["@type"] = ["schema:WebAPI"]
                     elif dt == "Data Download" or dt is None:
                         dist.setdefault("@type", ["schema:DataDownload"])
+
+                    # Wrap encodingFormat string back to array for JSON-LD storage
+                    enc = dist.get("schema:encodingFormat")
+                    if isinstance(enc, str) and enc:
+                        dist["schema:encodingFormat"] = [enc]
+                    elif isinstance(enc, str):
+                        dist.pop("schema:encodingFormat", None)
+
+                    # Infer fileDetail @type from componentType
+                    fd = dist.get("fileDetail")
+                    if isinstance(fd, dict):
+                        ct = fd.get("componentType")
+                        if isinstance(ct, dict):
+                            ct_type = ct.get("@type", "")
+                            inferred = _infer_file_detail_type(ct_type)
+                            if inferred:
+                                fd["@type"] = inferred
 
         if jsonld and profile.schema:
             errors = validate_record(jsonld, profile.schema)
