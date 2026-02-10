@@ -5,8 +5,10 @@ services:
     container_name: dsp_nginx
     volumes:
       - ./nginx/nginx-demo.conf:/etc/nginx/nginx.conf
+      - ./nginx/config:/etc/ssl
     ports:
       - 80:80
+      - 443:443
     depends_on:
       - dspfront
       - dspback
@@ -19,8 +21,8 @@ services:
       context: ./dspfront
       dockerfile: Dockerfile
     environment:
-      - VITE_APP_API_URL=http://${DEMO_HOST:-localhost}
-      - VITE_APP_URL=http://${DEMO_HOST:-localhost}
+      - VITE_APP_API_URL=${OUTSIDE_PROTO:-https}://${DEMO_HOST:-localhost}/api
+      - VITE_APP_URL=${OUTSIDE_PROTO:-https}://${DEMO_HOST:-localhost}
     restart: on-failure
 
   dspback:
@@ -46,6 +48,7 @@ services:
       dockerfile: Dockerfile-dev
     command: >
       sh -c "python manage.py migrate --noinput &&
+             python manage.py load_profiles &&
              gunicorn catalog.wsgi:application --bind 0.0.0.0:5003 --workers 2"
     restart: on-failure
     depends_on:
