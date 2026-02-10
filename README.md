@@ -17,9 +17,11 @@ IEDADataSubmission/
 ├── nginx/                   # Nginx reverse proxy configs
 ├── scripts/                 # Infrastructure scripts (DB init, etc.)
 ├── docker-compose-dev.yml   # Development stack (backend + nginx)
+├── docker-compose-demo.yml  # Self-contained demo stack (HTTP, all 5 services)
 ├── docker-compose-upstream.yml  # Full stack from source
 ├── docker-compose-artifact-registry.yml  # Full stack from registry
-└── .env                     # Environment variables
+├── .env                     # Environment variables
+└── .env.demo                # Demo env template (copy to .env for demo deploy)
 ```
 
 ## Components
@@ -269,6 +271,7 @@ dspfront/src/
 Docker Compose configuration and supporting services live at the repository root.
 
 - `docker-compose-dev.yml` — Development stack (backend + nginx with SSL)
+- `docker-compose-demo.yml` — Self-contained demo stack over plain HTTP (see below)
 - `docker-compose-upstream.yml` — Full stack built from source (frontend + backend)
 - `docker-compose-artifact-registry.yml` — Full stack from pre-built images
 - `nginx/` — Nginx reverse proxy configs (dev, full-dev, production)
@@ -406,6 +409,25 @@ docker-compose -f docker-compose-upstream.yml up --build
 ```
 
 Access the application at https://localhost/
+
+### Demo Deployment (VPS or Local)
+
+A self-contained stack that builds and runs all five services (nginx, frontend, backend, catalog, postgres) over plain HTTP. Suitable for a VPS demo or quick local test without SSL setup.
+
+```bash
+cp .env.demo .env
+# Edit .env — set DEMO_HOST and OUTSIDE_HOST to your VPS IP or domain
+docker compose -f docker-compose-demo.yml up -d --build
+```
+
+Access the application at `http://<DEMO_HOST>` (default: http://localhost).
+
+Key differences from the dev stack:
+- HTTP only (no SSL certificates needed)
+- Production Dockerfiles — frontend SPA built in-container
+- Named Docker volume for postgres (portable, no host path dependency)
+- Catalog runs migrations automatically on startup
+- Single `DEMO_HOST` variable controls the public-facing hostname
 
 ### Run Backend Only (Development)
 

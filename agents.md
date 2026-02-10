@@ -388,17 +388,49 @@ All form customizations (vocabulary, variable panel, distribution detail, MIME t
 
 ## Deployment
 
-Three Docker Compose configurations at the repo root:
+Four Docker Compose configurations at the repo root:
 
 | File | When to Use |
 |---|---|
-| `docker-compose-dev.yml` | Backend-only dev (backend + nginx, no frontend) |
+| `docker-compose-dev.yml` | Backend-only dev (backend + nginx, no frontend — you run Vite locally) |
+| `docker-compose-demo.yml` | Self-contained demo on a VPS or local machine (HTTP, all 5 services) |
 | `docker-compose-upstream.yml` | Full stack built from source |
 | `docker-compose-artifact-registry.yml` | Full stack from pre-built images |
 
-Nginx (`nginx/`) reverse proxies `/api/catalog/*` to the Django catalog backend (port 5003), `/api/*` to FastAPI (port 5002), and everything else to the frontend (port 5001). SSL termination happens at nginx. The `/api/catalog` location block must appear before `/api` in the nginx config for correct routing.
+Nginx (`nginx/`) reverse proxies `/api/catalog/*` to the Django catalog backend (port 5003), `/api/*` to FastAPI (port 5002), and everything else to the frontend (port 5001). SSL termination happens at nginx (dev/production) or is omitted (demo). The `/api/catalog` location block must appear before `/api` in the nginx config for correct routing.
 
-Environment variables (PostgreSQL credentials, OAuth credentials, JWT secrets) are in `.env` at the repo root.
+Environment variables (PostgreSQL credentials, OAuth credentials, JWT secrets) are in `.env` at the repo root. `.env.demo` is a ready-made template for demo deployments — copy it to `.env` and set `DEMO_HOST`/`OUTSIDE_HOST` to your VPS IP or domain.
+
+### Demo Deployment
+
+`docker-compose-demo.yml` provides a complete, self-contained stack over plain HTTP:
+
+```
+Internet → :80 → Nginx (nginx-demo.conf)
+                   ├── /              → dspfront (Vue SPA on :5001)
+                   ├── /api/catalog/* → catalog (Django on :5003)
+                   ├── /api/*         → dspback (FastAPI on :5002)
+                   └── /docs, /redoc  → dspback
+                 PostgreSQL (:5432, named volume, two databases: dsp + catalog)
+```
+
+Key differences from `docker-compose-dev.yml`:
+
+| | Dev | Demo |
+|---|---|---|
+| Frontend | Vite dev server on host (:8080), nginx proxies to `host.docker.internal` | Production SPA built in-container, served by internal nginx |
+| Backend | `Dockerfile-dev` + `dev-entrypoint.sh`, bind-mounts source | Production `Dockerfile`, no bind-mount |
+| Catalog | Bind-mounts source, gunicorn `--reload` | No source mount, auto-migrates, gunicorn without `--reload` |
+| SSL | Self-signed certs (HTTPS :443) | Plain HTTP :80 |
+| Postgres | Bind-mount `./dspback/postgres-data` | Named Docker volume `pgdata` |
+| Config | `nginx-dev.conf` | `nginx-demo.conf` |
+
+To deploy:
+```bash
+cp .env.demo .env
+# Edit .env: set DEMO_HOST and OUTSIDE_HOST to VPS IP or domain
+docker compose -f docker-compose-demo.yml up -d --build
+```
 
 ## Vocabulary Namespaces (for OGC Building Blocks)
 
