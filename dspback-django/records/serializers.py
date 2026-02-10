@@ -71,6 +71,23 @@ def _infer_file_detail_type(component_type_value):
     return None
 
 
+def _clean_physical_mapping_items(file_detail):
+    """Strip UI-only fields and re-wrap formats_InstanceVariable in physicalMapping items."""
+    for pm in file_detail.get("cdi:hasPhysicalMapping", []):
+        if not isinstance(pm, dict):
+            continue
+        # Strip _showAdvanced toggle
+        pm.pop("_showAdvanced", None)
+
+        # Wrap cdi:formats_InstanceVariable string back to {"@id": "..."}
+        fiv = pm.get("cdi:formats_InstanceVariable")
+        if isinstance(fiv, str) and fiv:
+            pm["cdi:formats_InstanceVariable"] = {"@id": fiv}
+        elif isinstance(fiv, str):
+            # Empty string — remove the key
+            pm.pop("cdi:formats_InstanceVariable", None)
+
+
 class ProfileSerializer(serializers.ModelSerializer):
     base_profile = serializers.SlugRelatedField(
         slug_field="name",
@@ -209,15 +226,25 @@ class RecordSerializer(serializers.ModelSerializer):
                             elif isinstance(hp_enc, str):
                                 part.pop("schema:encodingFormat", None)
 
-                    # Infer fileDetail @type from componentType
+                    # Clean physicalMapping items in fileDetail
                     fd = dist.get("fileDetail")
                     if isinstance(fd, dict):
+                        _clean_physical_mapping_items(fd)
+
+                        # Infer fileDetail @type from componentType
                         ct = fd.get("componentType")
                         if isinstance(ct, dict):
                             ct_type = ct.get("@type", "")
                             inferred = _infer_file_detail_type(ct_type)
                             if inferred:
                                 fd["@type"] = inferred
+
+                    # Clean physicalMapping in hasPart fileDetails too
+                    for part in dist.get("schema:hasPart", []):
+                        if isinstance(part, dict):
+                            part_fd = part.get("fileDetail")
+                            if isinstance(part_fd, dict):
+                                _clean_physical_mapping_items(part_fd)
 
         if jsonld and profile.schema:
             errors = validate_record(jsonld, profile.schema)

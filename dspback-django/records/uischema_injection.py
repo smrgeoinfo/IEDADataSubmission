@@ -208,6 +208,123 @@ def _fd_ctrl(prop, label):
     }
 
 
+def _pm_ctrl(prop, label):
+    """Shorthand for a physicalMapping item property control."""
+    return {
+        "type": "Control",
+        "scope": f"#/properties/{prop}",
+        "label": label,
+    }
+
+
+# Advanced field scopes for physicalMapping — used in OR conditions to auto-show
+# the Advanced group when any of these fields already has data.
+_PM_ADVANCED_FIELDS = [
+    ("cdi:format", {"minLength": 1}),
+    ("cdi:physicalDataType", {"minLength": 1}),
+    ("cdi:length", {"type": "number"}),
+    ("cdi:scale", {"type": "number"}),
+    ("cdi:decimalPositions", {"type": "number"}),
+    ("cdi:minimumLength", {"type": "number"}),
+    ("cdi:maximumLength", {"type": "number"}),
+    ("cdi:nullSequence", {"minLength": 1}),
+    ("cdi:defaultValue", {"minLength": 1}),
+    ("cdi:displayLabel", {"minLength": 1}),
+    ("cdi:defaultDecimalSeparator", {"minLength": 1}),
+    ("cdi:defaultDigitalGroupSeparator", {"minLength": 1}),
+]
+
+_PM_ADVANCED_OR_CONDITIONS = [
+    {"scope": "#/properties/_showAdvanced", "schema": {"const": True}},
+] + [
+    {"scope": f"#/properties/{prop}", "schema": schema, "failWhenUndefined": True}
+    for prop, schema in _PM_ADVANCED_FIELDS
+]
+
+_PM_ADVANCED_GROUP = {
+    "type": "Group",
+    "label": "Advanced",
+    "rule": {
+        "effect": "SHOW",
+        "condition": {
+            "type": "OR",
+            "conditions": _PM_ADVANCED_OR_CONDITIONS,
+        },
+    },
+    "elements": [
+        _pm_ctrl("cdi:format", "Format"),
+        _pm_ctrl("cdi:physicalDataType", "Physical Data Type"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _pm_ctrl("cdi:length", "Length"),
+                _pm_ctrl("cdi:scale", "Scale"),
+                _pm_ctrl("cdi:decimalPositions", "Decimal Positions"),
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _pm_ctrl("cdi:minimumLength", "Min Length"),
+                _pm_ctrl("cdi:maximumLength", "Max Length"),
+            ],
+        },
+        _pm_ctrl("cdi:nullSequence", "Null Sequence"),
+        _pm_ctrl("cdi:defaultValue", "Default Value"),
+        _pm_ctrl("cdi:isRequired", "Required"),
+        _pm_ctrl("cdi:displayLabel", "Display Label"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _pm_ctrl("cdi:defaultDecimalSeparator", "Decimal Separator"),
+                _pm_ctrl("cdi:defaultDigitalGroupSeparator", "Group Separator"),
+            ],
+        },
+    ],
+}
+
+# Detail layout for physicalMapping items (tabularData — no locator field)
+PHYSICAL_MAPPING_DETAIL = {
+    "type": "VerticalLayout",
+    "elements": [
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _pm_ctrl("cdi:index", "Column Index"),
+                _pm_ctrl("cdi:formats_InstanceVariable", "Variable"),
+            ],
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/_showAdvanced",
+            "label": "Show Advanced Options",
+        },
+        _PM_ADVANCED_GROUP,
+    ],
+}
+
+# Detail layout for physicalMapping items (dataCube — includes locator field)
+PHYSICAL_MAPPING_DATACUBE_DETAIL = {
+    "type": "VerticalLayout",
+    "elements": [
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _pm_ctrl("cdi:index", "Column Index"),
+                _pm_ctrl("cdi:formats_InstanceVariable", "Variable"),
+            ],
+        },
+        _pm_ctrl("cdi:locator", "Locator"),
+        {
+            "type": "Control",
+            "scope": "#/properties/_showAdvanced",
+            "label": "Show Advanced Options",
+        },
+        _PM_ADVANCED_GROUP,
+    ],
+}
+
+
 # File-type Groups shown inside DISTRIBUTION_DETAIL based on MIME selection.
 
 IMAGE_DETAIL_GROUP = {
@@ -267,7 +384,15 @@ TABULAR_DETAIL_GROUP = {
                 _fd_ctrl("countColumns", "Column Count"),
             ],
         },
-        _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+        {
+            "type": "Control",
+            "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+            "label": "Physical Mapping",
+            "options": {
+                "elementLabelProp": "cdi:formats_InstanceVariable",
+                "detail": PHYSICAL_MAPPING_DETAIL,
+            },
+        },
     ],
 }
 
@@ -277,7 +402,15 @@ DATACUBE_DETAIL_GROUP = {
     "rule": _mime_and_download_rule(DATACUBE_MIMES),
     "elements": [
         _fd_ctrl("componentType", "Component Type"),
-        _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+        {
+            "type": "Control",
+            "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+            "label": "Physical Mapping",
+            "options": {
+                "elementLabelProp": "cdi:formats_InstanceVariable",
+                "detail": PHYSICAL_MAPPING_DATACUBE_DETAIL,
+            },
+        },
         _fd_ctrl("dataComponentResource", "Data Component Resource"),
     ],
 }
@@ -534,7 +667,15 @@ HAS_PART_DETAIL = {
                         _fd_ctrl("countColumns", "Column Count"),
                     ],
                 },
-                _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+                {
+                    "type": "Control",
+                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "label": "Physical Mapping",
+                    "options": {
+                        "elementLabelProp": "cdi:formats_InstanceVariable",
+                        "detail": PHYSICAL_MAPPING_DETAIL,
+                    },
+                },
             ],
         },
         # Data cube details
@@ -544,7 +685,15 @@ HAS_PART_DETAIL = {
             "rule": _hp_mime_rule(DATACUBE_MIMES),
             "elements": [
                 _fd_ctrl("componentType", "Component Type"),
-                _fd_ctrl("cdi:hasPhysicalMapping", "Physical Mapping"),
+                {
+                    "type": "Control",
+                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "label": "Physical Mapping",
+                    "options": {
+                        "elementLabelProp": "cdi:formats_InstanceVariable",
+                        "detail": PHYSICAL_MAPPING_DATACUBE_DETAIL,
+                    },
+                },
                 _fd_ctrl("dataComponentResource", "Data Component Resource"),
             ],
         },
@@ -727,6 +876,28 @@ def inject_schema_defaults(schema, profile_name=None):
                 "type": "string",
                 "enum": mime_enum,
             }
+
+        # --- physicalMapping item defaults ---
+        # Inject _showAdvanced boolean and simplify formats_InstanceVariable
+        # for each place physicalMapping appears (distribution-level fileDetail
+        # and hasPart-level fileDetail).
+        for props_container in [dist_props, hp_props]:
+            fd_schema = props_container.get("fileDetail", {})
+            fd_props = fd_schema.get("properties", {})
+            pm = fd_props.get("cdi:hasPhysicalMapping", {})
+            pm_items = pm.get("items", {})
+            pm_props = pm_items.get("properties", {})
+            if pm_props:
+                # Inject _showAdvanced toggle
+                pm_props["_showAdvanced"] = {"type": "boolean", "default": False}
+
+                # Simplify cdi:formats_InstanceVariable from object to string
+                # so CzForm renders a simple text input / dropdown.
+                # The serializer wraps back to {"@id": "..."} on save.
+                pm_props["cdi:formats_InstanceVariable"] = {
+                    "type": "string",
+                    "description": "Variable name or @id reference",
+                }
 
     return result
 
