@@ -444,3 +444,66 @@ Neither the base nor `other_type` schemas require the property, so omitting it s
 - `adaMetadataViews/viewapp/views.py` — `@type` fixes, `tabularProps`, `thedetail = {}` for metadata/fallback paths
 - `adaMetadataViews/templates/adaJSONLD.json` — Complete hasPart restructure, conditional encodingFormat
 - `adaMetadataViews/Standalone/regen_test_json.py` — New utility script for regenerating test JSON
+
+## 2026-02-10: Demo Deployment Stack
+
+**What changed:** Added a self-contained Docker Compose configuration (`docker-compose-demo.yml`) that builds and runs the full 5-service stack from source, suitable for VPS demo hosting or local testing.
+
+**Architecture:**
+```
+Internet → :80/:443 → Nginx (nginx-demo.conf, self-signed SSL)
+                        ├── /              → dspfront (Vue SPA on :5001)
+                        ├── /api/catalog/* → catalog (Django on :5003)
+                        ├── /api/*         → dspback (FastAPI on :5002)
+                        └── /docs, /redoc  → dspback
+                      PostgreSQL (:5432, named volume, two databases: dsp + catalog)
+```
+
+**New files:**
+- `docker-compose-demo.yml` — All 5 services, HTTP+HTTPS, postgres healthcheck, auto-migrate + load_profiles on catalog startup
+- `nginx/nginx-demo.conf` — Reverse proxy with HTTP (port 80) and HTTPS (port 443, self-signed certs from `nginx/config/`)
+- `.env.demo` — Template env file (copy to `.env` and customize `DEMO_HOST`, `OUTSIDE_HOST`)
+- `.gitattributes` — Enforces LF line endings on `*.sh` files (CRLF breaks Docker container exec)
+
+**Key differences from `docker-compose-dev.yml`:**
+
+| | Dev | Demo |
+|---|---|---|
+| Frontend | Vite dev server on host (:8080), nginx proxies to `host.docker.internal` | Production SPA built in-container, runtime env substitution via entrypoint.sh |
+| Backend | `Dockerfile-dev` + `dev-entrypoint.sh`, bind-mounts source | Production `Dockerfile`, no bind-mount |
+| Catalog | Bind-mounts source, gunicorn `--reload` | No source mount, auto-migrates + loads profiles, gunicorn without `--reload` |
+| SSL | Self-signed certs (HTTPS :443 only) | Both HTTP :80 and HTTPS :443 |
+| Postgres | Bind-mount `./dspback/postgres-data` | Named Docker volume `pgdata` |
+
+**Submodule fixes (dspfront):**
+- `.npmrc` — Added `legacy-peer-deps=true` (npm peer dependency conflict with `vite-ssg` wanting `vue-router@^4` vs project's `vue-router@^5`)
+- `Dockerfile` — `COPY package*.json .npmrc ./` before `npm install` so `.npmrc` settings take effect
+- `docker/entrypoint.sh` — Fixed CRLF→LF line endings (broke `exec` in Linux containers)
+- `.gitattributes` — Enforces LF on shell scripts
+
+**Submodule fixes (dspback):**
+- `config/__init__.py` — Added `outside_proto: str = "https"` setting
+- `dependencies.py` — `url_for()` uses `OUTSIDE_PROTO` instead of hardcoded `https://`, enabling HTTP deployments
+
+**ORCID OAuth setup for demo:**
+- ORCID sandbox doesn't accept `localhost` or `127.0.0.1` as redirect URI domains
+- Workaround: use `lvh.me` (a public domain that resolves to 127.0.0.1) — add `127.0.0.1 lvh.me` to hosts file if DNS doesn't resolve it
+- Register `https://lvh.me/api/auth` as redirect URI in ORCID developer tools
+- Set `OUTSIDE_HOST=lvh.me` and `DEMO_HOST=lvh.me` in `.env`
+- `VITE_APP_API_URL` must include `/api` suffix and match the protocol/host the user accesses (compose uses `${OUTSIDE_PROTO}://${DEMO_HOST}/api`)
+
+**Issues encountered and fixed:**
+1. CRLF line endings in `entrypoint.sh` and `init-catalog-db.sh` → "no such file or directory" in containers
+2. npm peer dependency conflict → added `legacy-peer-deps=true` to `.npmrc` and copied it before `npm install`
+3. Postgres startup race → added healthcheck + `condition: service_healthy` on dependent services
+4. Missing `/api` in `VITE_APP_API_URL` → login popup opened the SPA instead of the backend login endpoint
+5. Hardcoded `https://` in `url_for()` → added configurable `OUTSIDE_PROTO`
+6. ORCID redirect URI mismatch → use `lvh.me` domain, match protocol to `OUTSIDE_PROTO`
+7. Mixed content (HTTPS page calling HTTP API) → frontend env vars derive protocol from `OUTSIDE_PROTO`
+
+**To deploy:**
+```bash
+cp .env.demo .env
+# Edit .env: set DEMO_HOST, OUTSIDE_HOST, ORCID credentials
+docker compose -f docker-compose-demo.yml up -d --build
+```
