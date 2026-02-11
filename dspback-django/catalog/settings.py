@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     # Local
     "accounts",
     "records",
+    "ada_bridge",
 ]
 
 SITE_ID = 1
@@ -177,3 +178,8 @@ SOCIALACCOUNT_AUTO_SIGNUP = True
 SOCIALACCOUNT_LOGIN_ON_GET = True
 
 OUTSIDE_HOST = os.environ.get("OUTSIDE_HOST", "localhost")
+
+# --- ADA Bridge ---
+
+ADA_API_BASE_URL = os.environ.get("ADA_API_BASE_URL", "http://localhost:8000")
+ADA_API_KEY = os.environ.get("ADA_API_KEY", "")

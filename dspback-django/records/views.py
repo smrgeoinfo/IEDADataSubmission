@@ -153,7 +153,9 @@ class RecordViewSet(viewsets.ModelViewSet):
 
         # Validate against profile schema
         if profile.schema:
-            errors = validate_record(jsonld, profile.schema)
+            from records.serializers import _relax_type_constraints
+            validation_schema = _relax_type_constraints(profile.schema)
+            errors = validate_record(jsonld, validation_schema)
             if errors:
                 return Response(
                     {"jsonld": errors},
@@ -196,7 +198,9 @@ class RecordViewSet(viewsets.ModelViewSet):
 
         # Validate against profile schema
         if profile.schema:
-            errors = validate_record(jsonld, profile.schema)
+            from records.serializers import _relax_type_constraints
+            validation_schema = _relax_type_constraints(profile.schema)
+            errors = validate_record(jsonld, validation_schema)
             if errors:
                 return Response(
                     {"jsonld": errors},

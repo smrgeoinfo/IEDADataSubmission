@@ -6,5 +6,6 @@ from django.urls import include, path
 urlpatterns = [
     path("api/catalog/admin/", admin.site.urls),
     path("api/catalog/", include("records.urls")),
+    path("api/ada-bridge/", include("ada_bridge.urls")),
     path("api/", include("accounts.urls")),
 ]

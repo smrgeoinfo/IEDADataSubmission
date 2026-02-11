@@ -834,7 +834,7 @@ def inject_schema_defaults(schema, profile_name=None):
 
     at_type = items_props.get("@type", {})
     if isinstance(at_type, dict) and "default" not in at_type and at_type.get("type") == "array":
-        at_type["default"] = ["schema:PropertyValue"]
+        at_type["default"] = ["schema:PropertyValue", "cdi:InstanceVariable"]
 
     # Inject _showAdvanced boolean for advanced toggle
     if items_props:

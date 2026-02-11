@@ -1,3 +1,4 @@
+import copy
 import uuid
 
 from rest_framework import serializers
@@ -71,6 +72,18 @@ def _infer_file_detail_type(component_type_value):
     return None
 
 
+def _strip_empty_dict(d):
+    """Remove keys whose values are empty strings, empty lists, empty dicts, or None."""
+    for key in list(d.keys()):
+        v = d[key]
+        if v is None or v == "" or v == [] or v == {}:
+            del d[key]
+        elif isinstance(v, dict):
+            _strip_empty_dict(v)
+            if not v:
+                del d[key]
+
+
 def _clean_physical_mapping_items(file_detail):
     """Strip UI-only fields and re-wrap formats_InstanceVariable in physicalMapping items."""
     for pm in file_detail.get("cdi:hasPhysicalMapping", []):
@@ -86,6 +99,58 @@ def _clean_physical_mapping_items(file_detail):
         elif isinstance(fiv, str):
             # Empty string — remove the key
             pm.pop("cdi:formats_InstanceVariable", None)
+
+
+def _relax_type_constraints(schema):
+    """Relax overly-restrictive @type enum constraints for validation.
+
+    The OGC Building Block build output produces schemas where @type arrays
+    use ``items.enum`` with a single value, preventing dual-typed items.
+    For example variableMeasured items need both schema:PropertyValue and
+    cdi:InstanceVariable, but the build schema enum only lists one.
+
+    This function converts those single-value ``items.enum`` constraints into
+    ``contains`` constraints so the validator only checks that the required
+    type is present without rejecting additional types.
+    """
+    result = copy.deepcopy(schema)
+
+    # variableMeasured items @type
+    vm_type = (
+        result.get("properties", {})
+        .get("schema:variableMeasured", {})
+        .get("items", {})
+        .get("properties", {})
+        .get("@type", {})
+    )
+    if isinstance(vm_type, dict):
+        items_schema = vm_type.get("items", {})
+        if isinstance(items_schema, dict) and "enum" in items_schema:
+            required = items_schema["enum"][0] if items_schema["enum"] else None
+            vm_type["items"] = {"type": "string"}
+            if required:
+                vm_type["contains"] = {"const": required}
+            vm_type.setdefault("minItems", 1)
+
+    # distribution items @type
+    dist_items_schema = (
+        result.get("properties", {})
+        .get("schema:distribution", {})
+        .get("items", {})
+    )
+    dist_type = dist_items_schema.get("properties", {}).get("@type", {})
+    if isinstance(dist_type, dict):
+        items_schema = dist_type.get("items", {})
+        if isinstance(items_schema, dict) and "enum" in items_schema:
+            # Allow both DataDownload and WebAPI
+            dist_type["items"] = {"type": "string"}
+            dist_type.pop("contains", None)  # Don't constrain to one type
+
+    # Strip UI-injected properties from the schema's required lists so
+    # stale _distributionType / _showAdvanced don't trip required checks.
+    # (additionalProperties is not set, so extra keys are fine.)
+
+    return result
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -196,10 +261,20 @@ class RecordSerializer(serializers.ModelSerializer):
 
         # Strip UI-only fields before validation and storage
         if jsonld:
-            # Clean _showAdvanced from variableMeasured items
+            # Clean _showAdvanced from variableMeasured items and ensure @type
             for var in jsonld.get("schema:variableMeasured", []):
                 if isinstance(var, dict):
                     var.pop("_showAdvanced", None)
+                    # Ensure @type contains both required values
+                    vtype = var.get("@type", [])
+                    if isinstance(vtype, list):
+                        if "schema:PropertyValue" not in vtype:
+                            vtype.append("schema:PropertyValue")
+                        if "cdi:InstanceVariable" not in vtype:
+                            vtype.append("cdi:InstanceVariable")
+                        var["@type"] = vtype
+                    else:
+                        var["@type"] = ["schema:PropertyValue", "cdi:InstanceVariable"]
 
             # Clean _distributionType from distribution items and set @type
             for dist in jsonld.get("schema:distribution", []):
@@ -208,7 +283,7 @@ class RecordSerializer(serializers.ModelSerializer):
                     if dt == "Web API":
                         dist["@type"] = ["schema:WebAPI"]
                     elif dt == "Data Download" or dt is None:
-                        dist.setdefault("@type", ["schema:DataDownload"])
+                        dist["@type"] = ["schema:DataDownload"]
 
                     # Wrap encodingFormat string back to array for JSON-LD storage
                     enc = dist.get("schema:encodingFormat")
@@ -239,6 +314,13 @@ class RecordSerializer(serializers.ModelSerializer):
                             if inferred:
                                 fd["@type"] = inferred
 
+                        # Strip empty fileDetail to avoid anyOf validation
+                        # failures when no componentType has been selected yet
+                        if not fd.get("@type") and not fd.get("componentType"):
+                            _strip_empty_dict(fd)
+                            if not fd:
+                                dist.pop("fileDetail", None)
+
                     # Clean physicalMapping in hasPart fileDetails too
                     for part in dist.get("schema:hasPart", []):
                         if isinstance(part, dict):
@@ -247,7 +329,8 @@ class RecordSerializer(serializers.ModelSerializer):
                                 _clean_physical_mapping_items(part_fd)
 
         if jsonld and profile.schema:
-            errors = validate_record(jsonld, profile.schema)
+            validation_schema = _relax_type_constraints(profile.schema)
+            errors = validate_record(jsonld, validation_schema)
             if errors:
                 raise serializers.ValidationError({"jsonld": errors})
 

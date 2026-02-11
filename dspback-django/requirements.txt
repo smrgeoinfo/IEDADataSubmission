@@ -9,3 +9,5 @@ jsonschema[format]>=4.23,<5.0
 python-dotenv>=1.0,<2.0
 gunicorn>=22.0,<23.0
 requests>=2.31,<3.0
+# ADA Bridge — bundle introspection (optional; install from local path or PyPI)
+# ada_metadata_forms
