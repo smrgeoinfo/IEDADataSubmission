@@ -249,7 +249,7 @@ The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json
 ```
 
-**Six profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`, `CDIFDiscovery` — technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets constraining which file types are valid for each technique.
+**Seven profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (ADA technique profiles), `CDIFDiscovery`, `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
 
 **Key files**:
 - `OCGbuildingBlockTest/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
@@ -280,6 +280,30 @@ To add a new technique profile (e.g., `adaXRF`):
 5. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
 6. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
 7. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
+
+### Adding a New CDIF Profile
+
+To add a new domain-specific CDIF profile (e.g., `CDIFxas`):
+
+1. **Domain building blocks** — Create building blocks under `OCGbuildingBlockTest/_sources/xasProperties/` (or similar domain directory). Each BB has `bblock.json`, `schema.yaml`, `{name}Schema.json`. The YAML schema defines constraints using `allOf`/`contains` patterns. Keep a parallel JSON schema (`{name}Schema.json`) for direct use.
+2. **Profile** — Create `OCGbuildingBlockTest/_sources/profiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
+   ```yaml
+   allOf:
+   - $ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json
+   - $ref: ../../schemaorgProperties/cdifOptional/cdifOptionalSchema.json
+   - $ref: ../../xasProperties/xasOptional/xasOptionalSchema.json
+   - $ref: ../../xasProperties/xasRequired/xasRequiredSchema.json
+   ```
+3. **Resolve schema** — Run `python tools/resolve_schema.py CDIFxas --flatten-allof -o _sources/profiles/CDIFxas/resolvedSchema.json`.
+4. **JSON Forms static files** — Create `_sources/jsonforms/profiles/CDIFxas/` with `uischema.json` and `defaults.json`. The uischema defines tab layout; defaults provide `@context` with domain namespaces and pre-populated values (e.g., measurement technique for XAS).
+5. **Schema conversion** — Add the profile name to `CDIF_PROFILES` in `tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --profile CDIFxas`.
+6. **Load profile** — Run `docker exec catalog python manage.py load_profiles`.
+7. **Frontend** — CDIF profiles with names starting with `CDIF` (excluding `CDIFDiscovery`) are auto-discovered by `ada-select-type.vue` and shown in the "CDIF Profiles" section. Add the profile to `profileNames` in `geodat.ada-profile-form.vue` and add i18n strings in `messages.ts`.
+8. **Validate** — Create example JSON instances in the building block directories. Run `python tools/resolve_schema.py` and validate examples against the resolved schema.
+
+### Schema Consistency Validation
+
+Keep YAML (`schema.yaml`) and JSON (`{name}Schema.json`) schemas in sync. Use `tools/compare_schemas.py` periodically to detect drift between the two representations across all building blocks. The tool reports structural differences (missing keys, type mismatches, value differences) for each building block.
 
 ## Catalog Backend (dspback-django)
 

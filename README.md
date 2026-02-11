@@ -124,7 +124,7 @@ My Submissions page shows both:
   • Catalog Records tab → GET /api/catalog/records/?mine=true (catalog)
 ```
 
-Six profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), and `CDIFDiscovery`. The profile list is fetched dynamically from the catalog API.
+Seven profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), `CDIFDiscovery`, and `CDIFxas` (XAS-specific CDIF profile). The profile list is fetched dynamically from the catalog API.
 
 #### Adding a New ADA Profile
 
@@ -390,8 +390,14 @@ OCGbuildingBlockTest/_sources/
 │   ├── document/              # Supplemental documents (calibration, methods, logs)
 │   ├── otherFile/             # Non-standard file formats (EMSA, OBJ, STL, XLSX)
 │   └── files/                 # File-level metadata (generic, type constraints at profile level)
+├── xasProperties/
+│   ├── xasRequired/           # Required XAS properties (source, monochromator, sample)
+│   ├── xasOptional/           # Optional XAS properties (extends xasRequired)
+│   ├── xasSample/             # XAS sample with MaterialSample + iSample type
+│   └── xasSubject/            # XAS metadata record subject (requires cdif:profile_xasCDIF)
 └── profiles/
-    └── adaProduct/            # Top-level ADA product profile (composes all BBs)
+    ├── adaProduct/            # Top-level ADA product profile (composes all BBs)
+    └── CDIFxas/               # CDIF XAS profile (CDIF discovery + XAS properties)
 ```
 
 Each building block directory contains:
@@ -408,8 +414,9 @@ A GitHub Actions workflow (`Validate and process Building Blocks`) runs on every
 ```
 OCGbuildingBlockTest/tools/
 ├── convert_for_jsonforms.py   # Converts Draft 2020-12 → Draft 7, resolves $ref, simplifies anyOf
-├── cors_server.py             # CORS-enabled HTTP server for local development
-└── resolve_schema.py          # Resolves $ref in BB schemas (used by validation workflow)
+├── resolve_schema.py          # Resolves $ref in BB schemas (used by validation workflow)
+├── compare_schemas.py         # Compares YAML and JSON schemas across all BBs for consistency
+└── cors_server.py             # CORS-enabled HTTP server for local development
 ```
 
 #### JSON Forms Static Files (hand-crafted)
@@ -423,7 +430,8 @@ OCGbuildingBlockTest/_sources/jsonforms/profiles/
 ├── adaXRD/
 ├── adaICPMS/
 ├── adaVNMIR/
-└── CDIFDiscovery/
+├── CDIFDiscovery/
+└── CDIFxas/
 ```
 
 #### JSON Forms Generated Output
@@ -435,7 +443,8 @@ OCGbuildingBlockTest/build/jsonforms/profiles/
 ├── adaXRD/schema.json
 ├── adaICPMS/schema.json
 ├── adaVNMIR/schema.json
-└── CDIFDiscovery/schema.json
+├── CDIFDiscovery/schema.json
+└── CDIFxas/schema.json
 ```
 
 #### Vocabulary Namespaces
@@ -449,6 +458,7 @@ OCGbuildingBlockTest/build/jsonforms/profiles/
 | `spdx` | `http://spdx.org/rdf/terms#` | File checksums |
 | `nxs` | `http://purl.org/nexusformat/definitions/` | NeXus instrument/source classes |
 | `csvw` | `http://www.w3.org/ns/csvw#` | Tabular data descriptions |
+| `xas` | `https://xas.org/dictionary/` | XAS-specific property identifiers |
 | `dcterms` | `http://purl.org/dc/terms/` | Conformance declarations |
 
 ## Getting Started
