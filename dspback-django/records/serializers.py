@@ -193,7 +193,7 @@ class ProfileSerializer(serializers.ModelSerializer):
             pass
 
         if data.get("uischema"):
-            data["uischema"] = inject_uischema(data["uischema"], person_names=person_names)
+            data["uischema"] = inject_uischema(data["uischema"], person_names=person_names, profile_name=instance.name)
         if data.get("schema"):
             data["schema"] = inject_schema_defaults(data["schema"], profile_name=instance.name)
         return data

@@ -811,10 +811,149 @@ DISTRIBUTION_DETAIL = {
     ],
 }
 
+# Distribution detail WITHOUT ADA-specific fileDetail groups.
+# Used for non-ADA profiles (e.g. CDIFDiscovery) that don't have fileDetail
+# in their distribution schema.  Includes CDIF-specific fields like checksum,
+# provider, terms of service, and potential action.
+DISTRIBUTION_DETAIL_BASIC = {
+    "type": "VerticalLayout",
+    "elements": [
+        {
+            "type": "Control",
+            "scope": "#/properties/_distributionType",
+            "label": "Distribution Type",
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:name",
+            "label": "Name",
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:description",
+            "label": "Description",
+        },
+        # --- Data Download fields ---
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:contentUrl",
+            "label": "Content URL",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Data Download"},
+                },
+            },
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:encodingFormat",
+            "label": "MIME Type",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Data Download"},
+                },
+            },
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/spdx:checksum",
+            "label": "Checksum",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Data Download"},
+                },
+            },
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:hasPart",
+            "label": "Archive Contents",
+            "options": {
+                "elementLabelProp": "schema:name",
+            },
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "type": "AND",
+                    "conditions": [
+                        {
+                            "scope": "#/properties/_distributionType",
+                            "schema": {"const": "Data Download"},
+                        },
+                        {
+                            "scope": "#/properties/schema:encodingFormat",
+                            "schema": {"const": "application/zip"},
+                        },
+                    ],
+                },
+            },
+        },
+        # --- Web API fields ---
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:serviceType",
+            "label": "Service Type",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Web API"},
+                },
+            },
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:documentation",
+            "label": "Documentation URL",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Web API"},
+                },
+            },
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:potentialAction",
+            "label": "Potential Action",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": "#/properties/_distributionType",
+                    "schema": {"const": "Web API"},
+                },
+            },
+        },
+        # --- Fields visible for all distribution types ---
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:provider",
+            "label": "Provider",
+        },
+        {
+            "type": "Control",
+            "scope": "#/properties/schema:termsOfService",
+            "label": "Terms of Service",
+        },
+    ],
+}
+
 
 # ---------------------------------------------------------------------------
 # Schema defaults injection
 # ---------------------------------------------------------------------------
+
+def _is_ada_profile(profile_name):
+    """Return True if this is an ADA profile (has fileDetail in distribution)."""
+    return profile_name and profile_name.startswith("ada")
+
 
 def inject_schema_defaults(schema, profile_name=None):
     """Add default values and injected properties at serve time.
@@ -822,6 +961,9 @@ def inject_schema_defaults(schema, profile_name=None):
     - variableMeasured items: @type default, _showAdvanced boolean
     - distribution items: _distributionType enum, WebAPI properties
     - encodingFormat: enum for MIME type selection (filtered per profile)
+    - Relax restrictive @type enum constraints so frontend AJV doesn't reject
+      multi-typed items (e.g. variableMeasured with both PropertyValue and
+      InstanceVariable).
     """
     result = copy.deepcopy(schema)
 
@@ -833,8 +975,19 @@ def inject_schema_defaults(schema, profile_name=None):
     items_props = items.get("properties", {})
 
     at_type = items_props.get("@type", {})
-    if isinstance(at_type, dict) and "default" not in at_type and at_type.get("type") == "array":
-        at_type["default"] = ["schema:PropertyValue", "cdi:InstanceVariable"]
+    if isinstance(at_type, dict) and at_type.get("type") == "array":
+        # Relax single-value enum on items so multi-typed values pass AJV.
+        # e.g. enum: ["schema:PropertyValue"] → items: {type: string} + contains
+        items_enum = at_type.get("items", {})
+        if isinstance(items_enum, dict) and "enum" in items_enum:
+            required_type = items_enum["enum"][0] if items_enum["enum"] else None
+            at_type["items"] = {"type": "string"}
+            if required_type:
+                at_type["contains"] = {"const": required_type}
+            at_type.setdefault("minItems", 1)
+
+        if "default" not in at_type:
+            at_type["default"] = ["schema:PropertyValue", "cdi:InstanceVariable"]
 
     # Inject _showAdvanced boolean for advanced toggle
     if items_props:
@@ -846,6 +999,14 @@ def inject_schema_defaults(schema, profile_name=None):
     dist_props = dist_items.get("properties", {})
 
     if dist_props:
+        # Relax distribution @type enum so both DataDownload and WebAPI pass AJV
+        dist_at_type = dist_props.get("@type", {})
+        if isinstance(dist_at_type, dict) and dist_at_type.get("type") == "array":
+            dist_type_items = dist_at_type.get("items", {})
+            if isinstance(dist_type_items, dict) and "enum" in dist_type_items:
+                dist_at_type["items"] = {"type": "string"}
+                dist_at_type.pop("contains", None)
+
         # Type selector field
         dist_props["_distributionType"] = {
             "type": "string",
@@ -906,14 +1067,14 @@ def inject_schema_defaults(schema, profile_name=None):
 # UISchema injection
 # ---------------------------------------------------------------------------
 
-def inject_uischema(uischema, person_names=None):
+def inject_uischema(uischema, person_names=None, profile_name=None):
     """Deep-copy uischema and inject layout configs on matching controls."""
     result = copy.deepcopy(uischema)
-    _walk(result, person_names=person_names)
+    _walk(result, person_names=person_names, profile_name=profile_name)
     return result
 
 
-def _walk(node, person_names=None):
+def _walk(node, person_names=None, profile_name=None):
     """Recursively walk the UISchema tree and inject configs on matching controls."""
     if not isinstance(node, dict):
         return
@@ -946,23 +1107,26 @@ def _walk(node, person_names=None):
     if scope in DISTRIBUTION_SCOPES:
         options = node.setdefault("options", {})
         options["elementLabelProp"] = "schema:name"
-        options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL)
+        if _is_ada_profile(profile_name):
+            options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL)
+        else:
+            options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL_BASIC)
 
     # Recurse into child nodes
     for child in node.get("elements", []):
-        _walk(child, person_names=person_names)
+        _walk(child, person_names=person_names, profile_name=profile_name)
 
     # Recurse into detail (used by array controls)
     detail = node.get("detail")
     if isinstance(detail, dict):
-        _walk(detail, person_names=person_names)
+        _walk(detail, person_names=person_names, profile_name=profile_name)
 
     # Recurse into options.detail
     options = node.get("options")
     if isinstance(options, dict):
         options_detail = options.get("detail")
         if isinstance(options_detail, dict):
-            _walk(options_detail, person_names=person_names)
+            _walk(options_detail, person_names=person_names, profile_name=profile_name)
 
 
 def _inject_maintainer_suggestions(node, person_names):
