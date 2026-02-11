@@ -32,7 +32,7 @@ class AdaRecordLinkSerializer(serializers.ModelSerializer):
 class PushResponseSerializer(serializers.Serializer):
     """Response returned after a push operation."""
 
-    ada_record_id = serializers.UUIDField()
+    ada_record_id = serializers.IntegerField()
     ada_status = serializers.CharField()
     ada_doi = serializers.CharField(allow_blank=True)
     pushed_at = serializers.DateTimeField(source="last_pushed_at")
@@ -41,7 +41,7 @@ class PushResponseSerializer(serializers.Serializer):
 class SyncResponseSerializer(serializers.Serializer):
     """Response returned after a sync operation."""
 
-    ada_record_id = serializers.UUIDField()
+    ada_record_id = serializers.IntegerField()
     ada_status = serializers.CharField()
     ada_doi = serializers.CharField(allow_blank=True)
     synced_at = serializers.DateTimeField(source="last_synced_at")

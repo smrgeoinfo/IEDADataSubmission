@@ -95,22 +95,22 @@ def _translate_creators(jsonld: dict) -> List[Dict[str, Any]]:
                     family_name = full_name
 
             creator_entry: Dict[str, Any] = {
-                "name_entity": {
-                    "full_name": full_name,
-                    "given_name": given_name,
-                    "family_name": family_name,
-                    "name_type": name_type,
+                "nameEntity": {
+                    "fullName": full_name,
+                    "givenName": given_name,
+                    "familyName": family_name,
+                    "nameType": name_type,
                 },
             }
 
             # ORCID identifier
             ident = _get(person, "schema:identifier")
             if isinstance(ident, str) and ident:
-                creator_entry["name_entity"]["orcid"] = ident
+                creator_entry["nameEntity"]["orcid"] = ident
             elif isinstance(ident, dict):
                 val = _get(ident, "schema:value") or _get(ident, "schema:url")
                 if val:
-                    creator_entry["name_entity"]["orcid"] = val
+                    creator_entry["nameEntity"]["orcid"] = val
 
             creators.append(creator_entry)
 
@@ -163,18 +163,18 @@ def _translate_contributors(jsonld: dict) -> List[Dict[str, Any]]:
                 family_name = full_name
 
         entry: Dict[str, Any] = {
-            "name_entity": {
-                "full_name": full_name,
-                "given_name": given_name,
-                "family_name": family_name,
-                "name_type": "Personal",
+            "nameEntity": {
+                "fullName": full_name,
+                "givenName": given_name,
+                "familyName": family_name,
+                "nameType": "Personal",
             },
-            "contributor_type": contributor_type,
+            "contributorType": contributor_type,
         }
 
         ident = _get(person_data, "schema:identifier")
         if isinstance(ident, str) and ident:
-            entry["name_entity"]["orcid"] = ident
+            entry["nameEntity"]["orcid"] = ident
 
         contributors.append(entry)
 
@@ -211,8 +211,8 @@ def _translate_funding(jsonld: dict) -> List[Dict[str, Any]]:
 
         entry: Dict[str, Any] = {
             "funder": {"name": funder_name},
-            "award_number": _get(grant, "identifier") or _get(grant, "schema:identifier") or "",
-            "award_title": _get(grant, "name") or _get(grant, "schema:name") or "",
+            "awardNumber": _get(grant, "identifier") or _get(grant, "schema:identifier") or "",
+            "awardTitle": _get(grant, "name") or _get(grant, "schema:name") or "",
         }
         result.append(entry)
     return result
@@ -315,31 +315,31 @@ def jsonld_to_ada(record_metadata: dict, profile: str = "") -> dict:
 
     submission_type = record_metadata.get("submissionType")
     if submission_type:
-        payload["submission_type"] = submission_type
+        payload["submissionType"] = submission_type
 
     additional_type = _get(record_metadata, "schema:additionalType")
     if additional_type:
-        payload["specific_type"] = (
+        payload["specificType"] = (
             additional_type if isinstance(additional_type, str)
             else additional_type[0] if additional_type else ""
         )
 
     date_published = _get(record_metadata, "schema:datePublished")
     if date_published:
-        payload["publication_date"] = date_published
+        payload["publicationDate"] = date_published
 
     # ---- Nested / array fields ----
     creators = _translate_creators(record_metadata)
     if creators:
-        payload["recordcreator_set"] = creators
+        payload["creators"] = creators
 
     contributors = _translate_contributors(record_metadata)
     if contributors:
-        payload["recordcontributor_set"] = contributors
+        payload["contributors"] = contributors
 
     funding = _translate_funding(record_metadata)
     if funding:
-        payload["recordfunding_set"] = funding
+        payload["funding"] = funding
 
     licenses = _translate_licenses(record_metadata)
     if licenses:
@@ -371,7 +371,8 @@ def ada_to_jsonld_status(ada_response: dict, link) -> None:
     link : AdaRecordLink
         The link object to update (caller is responsible for saving).
     """
-    link.ada_status = ada_response.get("process_status", "")
+    # ADA renders camelCase via CamelCaseJSONRenderer
+    link.ada_status = ada_response.get("processStatus", "") or ada_response.get("process_status", "")
     doi = ada_response.get("doi", "")
     if doi:
         link.ada_doi = doi

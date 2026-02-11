@@ -1,5 +1,3 @@
-import uuid
-
 from django.db import models
 
 
@@ -11,8 +9,8 @@ class AdaRecordLink(models.Model):
         on_delete=models.CASCADE,
         related_name="ada_link",
     )
-    ada_record_id = models.UUIDField(unique=True, help_text="ADA's record primary key")
-    ada_doi = models.CharField(max_length=255, blank=True, default="")
+    ada_record_id = models.IntegerField(unique=True, help_text="ADA's record integer primary key")
+    ada_doi = models.CharField(max_length=255, blank=True, default="", db_index=True)
     ada_status = models.CharField(
         max_length=50,
         blank=True,

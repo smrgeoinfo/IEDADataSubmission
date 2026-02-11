@@ -25,14 +25,16 @@ class Migration(migrations.Migration):
                 ),
                 (
                     "ada_record_id",
-                    models.UUIDField(
-                        help_text="ADA's record primary key",
+                    models.IntegerField(
+                        help_text="ADA's record integer primary key",
                         unique=True,
                     ),
                 ),
                 (
                     "ada_doi",
-                    models.CharField(blank=True, default="", max_length=255),
+                    models.CharField(
+                        blank=True, db_index=True, default="", max_length=255
+                    ),
                 ),
                 (
                     "ada_status",

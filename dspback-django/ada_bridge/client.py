@@ -82,27 +82,27 @@ class AdaClient:
     # ------------------------------------------------------------------
 
     def create_record(self, payload: dict) -> dict:
-        """POST /api/records/ — create a new record in ADA."""
+        """POST /api/record/ — create a new record in ADA."""
         response = self.session.post(
-            self._url("/api/records/"),
+            self._url("/api/record/"),
             json=payload,
             timeout=self.timeout,
         )
         return self._handle_response(response)
 
-    def update_record(self, record_id: str, payload: dict) -> dict:
-        """PATCH /api/records/{record_id}/ — update an existing ADA record."""
+    def update_record(self, record_doi: str, payload: dict) -> dict:
+        """PATCH /api/record/{doi} — update an existing ADA record."""
         response = self.session.patch(
-            self._url(f"/api/records/{record_id}/"),
+            self._url(f"/api/record/{record_doi}"),
             json=payload,
             timeout=self.timeout,
         )
         return self._handle_response(response)
 
-    def get_record(self, record_id: str) -> dict:
-        """GET /api/records/{record_id}/ — fetch a single ADA record."""
+    def get_record(self, record_doi: str) -> dict:
+        """GET /api/record/{doi} — fetch a single ADA record."""
         response = self.session.get(
-            self._url(f"/api/records/{record_id}/"),
+            self._url(f"/api/record/{record_doi}"),
             timeout=self.timeout,
         )
         return self._handle_response(response)
@@ -111,9 +111,9 @@ class AdaClient:
     # Bundle / file upload
     # ------------------------------------------------------------------
 
-    def upload_bundle(self, record_id: str, file_obj) -> dict:
+    def upload_bundle(self, record_doi: str, file_obj) -> dict:
         """
-        POST /api/bundles/ — upload a bundle ZIP to an ADA record.
+        POST /api/download/{doi}/ — upload a bundle to an ADA record.
 
         ``file_obj`` should be a file-like object opened in binary mode.
         """
@@ -123,9 +123,8 @@ class AdaClient:
             "Accept": "application/json",
         }
         response = requests.post(
-            self._url("/api/bundles/"),
+            self._url(f"/api/download/{record_doi}/"),
             files={"file": file_obj},
-            data={"record": str(record_id)},
             headers=headers,
             timeout=self.timeout,
         )
@@ -135,11 +134,11 @@ class AdaClient:
     # Status / DOI
     # ------------------------------------------------------------------
 
-    def get_record_status(self, record_id: str) -> dict:
+    def get_record_status(self, record_doi: str) -> dict:
         """
-        GET /api/records/{record_id}/ — fetch status and DOI info.
+        GET /api/record/{doi} — fetch status and DOI info.
 
         Returns the full record; callers typically only need
         ``process_status`` and ``doi``.
         """
-        return self.get_record(record_id)
+        return self.get_record(record_doi)

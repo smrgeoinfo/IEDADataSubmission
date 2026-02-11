@@ -81,26 +81,28 @@ def push_record_to_ada(ieda_record_id) -> AdaRecordLink:
     now = timezone.now()
 
     if link:
-        # Update existing ADA record
-        ada_response = client.update_record(str(link.ada_record_id), payload)
+        # Update existing ADA record via DOI
+        ada_response = client.update_record(link.ada_doi, payload)
         link.last_pushed_at = now
         link.push_checksum = checksum
         ada_to_jsonld_status(ada_response, link)
         link.save()
-        logger.info("Updated ADA record %s for IEDA record %s.", link.ada_record_id, ieda_record_id)
+        logger.info("Updated ADA record %s (DOI %s) for IEDA record %s.", link.ada_record_id, link.ada_doi, ieda_record_id)
     else:
         # Create new ADA record
         ada_response = client.create_record(payload)
         ada_record_id = ada_response.get("id")
+        ada_doi = ada_response.get("doi", "")
         link = AdaRecordLink(
             ieda_record=record,
             ada_record_id=ada_record_id,
+            ada_doi=ada_doi,
             last_pushed_at=now,
             push_checksum=checksum,
         )
         ada_to_jsonld_status(ada_response, link)
         link.save()
-        logger.info("Created ADA record %s for IEDA record %s.", ada_record_id, ieda_record_id)
+        logger.info("Created ADA record %s (DOI %s) for IEDA record %s.", ada_record_id, ada_doi, ieda_record_id)
 
     return link
 
@@ -133,7 +135,7 @@ def sync_ada_status(ieda_record_id) -> AdaRecordLink:
     )
 
     client = _get_client()
-    ada_response = client.get_record_status(str(link.ada_record_id))
+    ada_response = client.get_record_status(link.ada_doi)
     ada_to_jsonld_status(ada_response, link)
     link.last_synced_at = timezone.now()
     link.save()
@@ -187,7 +189,7 @@ def upload_bundle_and_introspect(
                 client = _get_client()
                 with open(tmp_path, "rb") as f:
                     ada_upload_response = client.upload_bundle(
-                        str(link.ada_record_id), f
+                        link.ada_doi, f
                     )
                 result["ada_upload"] = ada_upload_response
             except AdaRecordLink.DoesNotExist:
