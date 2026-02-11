@@ -258,6 +258,47 @@ ADA_API_KEY=your-ada-api-key-here      # API key from ADA's Django admin
 
 The bridge will work without these settings (push/sync calls will fail gracefully), so they're only needed when integrating with a running ADA instance.
 
+#### ADA Bridge Translation Mappings
+
+The translator (`ada_bridge/translator_ada.py`) converts IEDA JSON-LD (namespace-prefixed) metadata into the camelCase payload expected by the ADA `RecordSerializer`:
+
+| IEDA JSON-LD field | ADA API field |
+|---|---|
+| `schema:name` | `title` |
+| `schema:description` | `description` |
+| `schema:additionalType` | `specificType` |
+| `schema:datePublished` | `publicationDate` |
+| `schema:creator[].schema:name` | `creators[].nameEntity.fullName` |
+| `schema:creator[].schema:givenName` | `creators[].nameEntity.givenName` |
+| `schema:creator[].schema:familyName` | `creators[].nameEntity.familyName` |
+| `schema:creator[].schema:identifier` | `creators[].nameEntity.orcid` |
+| `schema:creator[].@type` | `creators[].nameEntity.nameType` (Personal/Organizational) |
+| `schema:contributor[]` (with `@type: Role`) | `contributors[].nameEntity` + `contributorType` |
+| `schema:funding[].schema:funder.schema:name` | `funding[].funder.name` |
+| `schema:funding[].schema:identifier` | `funding[].awardNumber` |
+| `schema:funding[].schema:name` | `funding[].awardTitle` |
+| `schema:license[]` | `licenses[].name` / `licenses[].url` |
+| `schema:distribution[]` | `files[].name` / `files[].extension` |
+| `schema:about[]` | `subjects[]` (pass-through) |
+
+Creator names are auto-split from `full_name` into `givenName`/`familyName` when those fields are not explicitly provided. Contributors with `@type: Role` are unwrapped to extract the `roleName` as `contributorType` and the nested person as the entity.
+
+#### ADA Record Link Tracking
+
+The `AdaRecordLink` model tracks the pairing between an IEDA catalog record and its counterpart in ADA:
+
+| Field | Description |
+|---|---|
+| `ieda_record` | One-to-one FK to `records.Record` |
+| `ada_record_id` | ADA's integer primary key |
+| `ada_doi` | DOI assigned by ADA (via DataCite) |
+| `ada_status` | ADA process status (e.g. Pending, Processed, Published) |
+| `last_pushed_at` | Timestamp of the last successful push |
+| `last_synced_at` | Timestamp of the last status sync from ADA |
+| `push_checksum` | SHA-256 of the last pushed payload |
+
+The push operation computes a deterministic SHA-256 checksum of the translated payload. If the checksum matches the stored `push_checksum`, the push is skipped — avoiding unnecessary API calls when metadata hasn't changed. On the first push, a new ADA record is created (`POST /api/record/`); subsequent pushes update the existing record (`PATCH /api/record/{doi}`).
+
 ### dspfront — Frontend Application
 
 Vue.js single-page application for browsing repositories, filling metadata forms, and managing submissions.
