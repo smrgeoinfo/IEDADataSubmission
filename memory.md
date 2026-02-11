@@ -507,3 +507,74 @@ cp .env.demo .env
 # Edit .env: set DEMO_HOST, OUTSIDE_HOST, ORCID credentials
 docker compose -f docker-compose-demo.yml up -d --build
 ```
+
+## 2026-02-10: ADA Bridge — Phase 1 Backend Integration
+
+**What changed:** Added the `ada_bridge` Django app to `dspback-django/`, providing a backend bridge between IEDA catalog records (JSON-LD) and the ADA (Astromat Data Archive) REST API. This is Phase 1: backend-only, no frontend UI yet.
+
+**Why:** The ADA frontend is browse/search-only — no UI for creating records or uploading bundles. IEDA has rich schema-driven forms for ADA metadata profiles. The bridge enables records authored in IEDA's forms to be pushed to ADA via its REST API, with DOI and status synced back.
+
+**Architecture:**
+```
+IEDADataSubmission (dspback-django)         ADA API (Django/DRF)
+┌──────────────────────────────────┐        ┌─────────────────────┐
+│  records app (existing)          │        │                     │
+│    └─ Record model (JSON-LD)     │        │  /api/record/       │
+│                                  │        │  /api/download/     │
+│  ada_bridge app (NEW)            │        │                     │
+│    ├─ AdaRecordLink model        │───────>│  Api-Key auth       │
+│    ├─ translator_ada.py          │  HTTP  │  CamelCaseJSON      │
+│    ├─ client.py (AdaClient)      │        │                     │
+│    ├─ bundle_service.py          │        └─────────────────────┘
+│    ├─ views.py (push/sync API)   │
+│    └─ services.py (orchestrator) │
+└──────────────────────────────────┘
+```
+
+**New files (all under `dspback-django/ada_bridge/`):**
+- `models.py` — `AdaRecordLink`: OneToOne to `records.Record`, stores `ada_record_id` (int), `ada_doi`, `ada_status`, `push_checksum` (SHA-256 for change detection), timestamps
+- `translator_ada.py` — Translates JSON-LD (namespace-prefixed keys) to ADA API camelCase format. Maps `schema:creator` → `creators[].nameEntity`, `schema:contributor` → `contributors[]`, `schema:funding` → `funding[]`, `schema:license` → `licenses[]`, `schema:distribution` → `files[]`, `schema:about` → `subjects[]`. Includes `compute_payload_checksum()` for change detection.
+- `client.py` — `AdaClient`: HTTP client wrapping ADA REST API with `Api-Key` auth. Methods: `create_record()`, `update_record()`, `get_record()`, `upload_bundle()`, `get_record_status()`. Uses DOI-based URL paths (`/api/record/{doi}`).
+- `bundle_service.py` — ZIP introspection using `ada_metadata_forms` inspectors (ZipInspector, CSVInspector, ImageInspector, HDF5Inspector). Falls back gracefully when inspectors are unavailable.
+- `services.py` — Orchestration: `push_record_to_ada()` (translate → checksum → skip-if-unchanged → create/update → save link), `sync_ada_status()` (pull status/DOI from ADA → update link), `upload_bundle_and_introspect()` (save to temp → introspect → optionally push to ADA).
+- `views.py` — DRF function-based views: push, sync, status, bundle-introspect, bundle-upload
+- `urls.py` — Routes under `/api/ada-bridge/`
+- `serializers.py` — Request/response DRF serializers
+- `tests.py` — 74 tests (62 unit tests on SQLite, 12 integration tests requiring PostgreSQL)
+
+**API endpoints (all under `/api/ada-bridge/`, authenticated):**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `push/<uuid:record_id>/` | POST | Translate JSON-LD → ADA payload, create/update in ADA |
+| `sync/<uuid:record_id>/` | POST | Pull status + DOI from ADA → update AdaRecordLink |
+| `status/<uuid:record_id>/` | GET | Return current AdaRecordLink data |
+| `bundle/introspect/` | POST | Upload ZIP, return introspection results |
+| `bundle/upload/<uuid:record_id>/` | POST | Upload bundle to linked ADA record |
+
+**ADA-side changes (separate repo `ADA/api/`):**
+- `astromat_api/models/record.py` — Added `_SKIP_DATACITE` flag: when `DATACITE_PASSWORD` env var is unset, `get_doi_data()` generates dummy DOIs (`10.82622/dev-{uuid}`) instead of calling DataCite. Enables local dev without DataCite credentials.
+- `astromat_api/serializers/record_serializers.py` — Fixed `ListRecordSerializer.create()`: changed hard `.pop("recordcreator_set")` to `.pop("recordcreator_set", [])` (and similar for contributors, funding, licenses, subjects, files) so records with empty/missing nested fields don't raise `KeyError`.
+
+**Push flow (end-to-end verified):**
+1. `POST /api/ada-bridge/push/{id}/` → `services.push_record_to_ada()`
+2. Fetch IEDA Record → translate JSON-LD via `translator_ada.jsonld_to_ada()`
+3. Compute SHA-256 checksum → skip if matches `AdaRecordLink.push_checksum`
+4. No existing link → `AdaClient.create_record(payload)` → ADA creates record + mints DOI
+5. Has existing link → `AdaClient.update_record(doi, payload)` → ADA updates record
+6. Save `AdaRecordLink` with `ada_record_id`, `ada_doi`, `ada_status`, `push_checksum`
+
+**Key design decision — camelCase output:** ADA uses `djangorestframework-camel-case` (`CamelCaseJSONParser`/`CamelCaseJSONRenderer`), so the translator outputs camelCase keys (`fullName`, `givenName`, `awardNumber`, etc.) which ADA's parser converts to snake_case internally.
+
+**Key design decision — DOI-based API paths:** ADA's `RecordViewSet` uses DOI as the lookup field (not integer PK). The client uses `GET/PATCH /api/record/{doi}` for updates and status checks.
+
+**Test suite (74 tests):**
+- **Unit tests (62, run on SQLite):** translator helpers, creator/contributor/funding/license/file/subject translation, full payload translation, checksum stability, bundle introspection, payload format validation
+- **Integration tests (12, require PostgreSQL):** push (create + update + skip-unchanged), sync, status — mock `AdaClient` via `unittest.mock.patch`
+- Integration tests use `if connection.vendor != "postgresql": self.skipTest(...)` because Record model uses PostgreSQL-specific features (ArrayField, GinIndex)
+
+**Configuration added:**
+- `catalog/settings.py` — `ADA_API_BASE_URL`, `ADA_API_KEY` from environment; `ada_bridge` in `INSTALLED_APPS`
+- `catalog/urls.py` — `include("ada_bridge.urls")` under `api/ada-bridge/`
+
+**Deploy:** `docker exec catalog python manage.py migrate` to create `ada_bridge_adarecordlink` table. Set `ADA_API_BASE_URL` and `ADA_API_KEY` in `.env`.

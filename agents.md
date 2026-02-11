@@ -301,7 +301,8 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
 | `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, MIME type enum on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM |
-| `dspback-django/records/tests.py` | 99 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup |
+| `dspback-django/records/tests.py` | 130 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup, hasPart groups |
+| `dspback-django/ada_bridge/tests.py` | 74 tests: translator unit tests (62, SQLite), push/sync/status integration tests (12, PostgreSQL) |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
 | `dspback-django/records/management/commands/backfill_entities.py` | Populates KnownPerson/KnownOrganization from all existing records |
 
@@ -385,6 +386,103 @@ The CDIF Discovery profile schema is built from OGC Building Block source schema
 ### Serve-Time Injection Pattern
 
 All form customizations (vocabulary, variable panel, distribution detail, MIME types) use the same pattern: `ProfileSerializer.to_representation()` calls `inject_uischema()` and `inject_schema_defaults()` which modify the schema/uischema deep copies before returning to the frontend. UI-only fields (`_showAdvanced`, `_distributionType`) are injected at serve time and stripped by `RecordSerializer.validate()` before storage. This means no OGC Building Block schema files need editing for form UX changes.
+
+## ADA Bridge (ada_bridge app)
+
+The `ada_bridge` Django app bridges IEDA catalog records to the ADA (Astromat Data Archive) REST API. It translates JSON-LD metadata into ADA's expected format, pushes records via HTTP, and syncs status/DOI back.
+
+### Architecture
+
+```
+IEDA Catalog Record (JSON-LD)
+        │
+        ▼
+  translator_ada.py   →  JSON-LD → ADA camelCase payload
+        │
+        ▼
+  services.py         →  Orchestration (checksum, create/update logic)
+        │
+        ▼
+  client.py           →  HTTP POST/PATCH to ADA REST API
+        │
+        ▼
+  AdaRecordLink       →  Tracks IEDA↔ADA record pair, DOI, status, checksum
+```
+
+### Key Files
+
+| File | What It Does |
+|------|--------------|
+| `ada_bridge/models.py` | `AdaRecordLink` — OneToOne link to `records.Record`, stores `ada_record_id`, `ada_doi`, `ada_status`, `push_checksum` |
+| `ada_bridge/translator_ada.py` | Translates JSON-LD (namespace-prefixed) to ADA API camelCase. `jsonld_to_ada()`, `ada_to_jsonld_status()`, `compute_payload_checksum()` |
+| `ada_bridge/client.py` | `AdaClient` — HTTP wrapper for ADA API with `Api-Key` auth. CRUD + bundle upload via DOI-based paths |
+| `ada_bridge/services.py` | `push_record_to_ada()`, `sync_ada_status()`, `upload_bundle_and_introspect()` |
+| `ada_bridge/bundle_service.py` | ZIP introspection using `ada_metadata_forms` inspectors (CSV, image, HDF5) |
+| `ada_bridge/views.py` | DRF function-based views for push, sync, status, bundle endpoints |
+| `ada_bridge/urls.py` | URL routes under `/api/ada-bridge/` |
+| `ada_bridge/serializers.py` | Request/response DRF serializers |
+| `ada_bridge/tests.py` | 74 tests (62 unit on SQLite, 12 integration on PostgreSQL) |
+
+### API Endpoints
+
+All under `/api/ada-bridge/`, all require authentication:
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `push/<uuid:record_id>/` | POST | Translate + push record to ADA (create or update) |
+| `sync/<uuid:record_id>/` | POST | Pull status + DOI from ADA |
+| `status/<uuid:record_id>/` | GET | Get current `AdaRecordLink` data |
+| `bundle/introspect/` | POST | Upload ZIP, return introspection results |
+| `bundle/upload/<uuid:record_id>/` | POST | Upload bundle to linked ADA record |
+
+### Push Flow
+
+1. `POST /api/ada-bridge/push/{record_id}/`
+2. Fetch IEDA Record → `translator_ada.jsonld_to_ada(record.jsonld, profile_name)`
+3. Compute SHA-256 checksum → skip if matches `AdaRecordLink.push_checksum`
+4. No existing link → `AdaClient.create_record(payload)` (POST to ADA)
+5. Has existing link → `AdaClient.update_record(doi, payload)` (PATCH to ADA)
+6. Save `AdaRecordLink` with `ada_record_id`, `ada_doi`, `ada_status`, checksum
+
+### Field Mapping (translator_ada.py)
+
+| JSON-LD Source | ADA API Target |
+|---------------|----------------|
+| `schema:name` | `title` |
+| `schema:description` | `description` |
+| `schema:creator[].schema:name` | `creators[].nameEntity.fullName` |
+| `schema:creator[].schema:identifier` | `creators[].nameEntity.orcid` |
+| `schema:contributor[]` | `contributors[].nameEntity` + `contributorType` |
+| `schema:funding[].schema:funder` | `funding[].funder.name` |
+| `schema:funding[].schema:identifier` | `funding[].awardNumber` |
+| `schema:license[]` | `licenses[].name` / `url` |
+| `schema:distribution[]` | `files[].name` / `extension` |
+| `schema:additionalType` | `specificType` |
+| `schema:datePublished` | `publicationDate` |
+
+Creator names are split into `givenName`/`familyName` via `rsplit(" ", 1)`. `@type` determines `nameType` ("Personal" vs "Organizational"). ORCID identifiers are extracted from `schema:identifier`.
+
+### ADA API Notes
+
+- ADA uses `djangorestframework-camel-case` — accepts camelCase input, returns camelCase output
+- Auth: `Authorization: Api-Key <key>` header (via `djangorestframework-api-key`)
+- Record lookup by DOI: `GET/PATCH /api/record/{doi}`
+- When `DATACITE_PASSWORD` env var is unset, ADA generates dummy DOIs (`10.82622/dev-{uuid}`) instead of calling DataCite
+- ADA's `ListRecordSerializer.create()` handles missing nested fields (creators, contributors, etc.) with `.pop(..., [])` defaults
+
+### Testing
+
+- **Unit tests** (62, SQLite): translator helpers, all field mappings, checksum stability, bundle introspection
+- **Integration tests** (12, PostgreSQL): push create/update/skip-unchanged, sync, status — mock `AdaClient` via `unittest.mock.patch`
+- Integration tests skip on SQLite because `records.Record` uses PostgreSQL-specific features (ArrayField, GinIndex)
+
+Run tests: `docker exec catalog python manage.py test ada_bridge`
+
+### Configuration
+
+Settings in `catalog/settings.py` (from environment):
+- `ADA_API_BASE_URL` — Base URL of the ADA API (e.g., `http://ada-api:8000`)
+- `ADA_API_KEY` — API key created in ADA's Django admin
 
 ## Deployment
 

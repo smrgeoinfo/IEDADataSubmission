@@ -9,7 +9,7 @@ A web application for submitting, managing, and discovering research data across
 ```
 IEDADataSubmission/
 ├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback, develop)
-├── dspback-django/          # Django catalog backend (profile-driven metadata records)
+├── dspback-django/          # Django catalog backend (profile-driven metadata records + ADA bridge)
 ├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront, develop)
 ├── OCGbuildingBlockTest/    # OGC Building Blocks (submodule → smrgeoinfo/OCGbuildingBlockTest, master)
 ├── scrapers/                # Repository metadata scrapers
@@ -170,6 +170,8 @@ Django + DRF backend providing a generic metadata catalog API. Coexists alongsid
 
 Profiles are loaded from OGC Building Block build output via `python manage.py load_profiles`. Records store JSON-LD natively with JSON Schema validation against the profile's schema. Person and organization entities are accumulated from saved records into `KnownPerson`/`KnownOrganization` tables, providing autocomplete pick lists via search endpoints. UISchema vocabulary configs and variable panel layouts are injected at serve time.
 
+The `ada_bridge` app provides integration with the ADA (Astromat Data Archive) REST API — translating IEDA JSON-LD records to ADA's format, pushing them via HTTP, and syncing status/DOI back.
+
 #### Key Catalog Backend Files
 
 ```
@@ -187,18 +189,28 @@ dspback-django/
 │   ├── authentication.py    # JWT auth (Bearer header + ?access_token= query param)
 │   ├── views.py             # ORCID OAuth login/callback/logout
 │   └── adapters.py          # django-allauth ORCID adapter
-└── records/                  # Core app
-    ├── models.py            # Profile, Record, KnownPerson, KnownOrganization
-    ├── serializers.py       # DRF serializers with validation hooks + vocabulary injection
-    ├── views.py             # ProfileViewSet, RecordViewSet, persons/orgs search
-    ├── validators.py        # JSON Schema validation (Draft-07 / Draft-2020-12)
-    ├── services.py          # JSON-LD field extraction, entity upsert, URL import
-    ├── uischema_injection.py # UISchema tree walker (vocabulary + variable panel layout)
-    ├── admin.py             # Django admin registration
-    ├── tests.py             # 51 tests for pick lists + variable panel
-    └── management/commands/
-        ├── load_profiles.py      # Load profiles from OGC BB build output
-        └── backfill_entities.py  # Populate KnownPerson/KnownOrganization from existing records
+├── records/                  # Core app
+│   ├── models.py            # Profile, Record, KnownPerson, KnownOrganization
+│   ├── serializers.py       # DRF serializers with validation hooks + vocabulary injection
+│   ├── views.py             # ProfileViewSet, RecordViewSet, persons/orgs search
+│   ├── validators.py        # JSON Schema validation (Draft-07 / Draft-2020-12)
+│   ├── services.py          # JSON-LD field extraction, entity upsert, URL import
+│   ├── uischema_injection.py # UISchema tree walker (vocabulary + variable panel layout)
+│   ├── admin.py             # Django admin registration
+│   ├── tests.py             # 130 tests
+│   └── management/commands/
+│       ├── load_profiles.py      # Load profiles from OGC BB build output
+│       └── backfill_entities.py  # Populate KnownPerson/KnownOrganization from existing records
+└── ada_bridge/               # ADA API integration
+    ├── models.py             # AdaRecordLink (IEDA↔ADA record pair tracking)
+    ├── translator_ada.py     # JSON-LD → ADA camelCase payload translation
+    ├── client.py             # AdaClient — HTTP wrapper for ADA REST API
+    ├── services.py           # Orchestration: push, sync, bundle introspection
+    ├── bundle_service.py     # ZIP introspection via ada_metadata_forms inspectors
+    ├── views.py              # DRF views: push, sync, status, bundle endpoints
+    ├── urls.py               # Routes under /api/ada-bridge/
+    ├── serializers.py        # Request/response serializers
+    └── tests.py              # 74 tests (unit + integration)
 ```
 
 #### Catalog API Endpoints
@@ -217,6 +229,11 @@ dspback-django/
 | POST | `/api/catalog/records/import-file/` | Import record from file upload |
 | GET | `/api/catalog/persons/?q=` | Search known persons (autocomplete pick list) |
 | GET | `/api/catalog/organizations/?q=` | Search known organizations (autocomplete pick list) |
+| POST | `/api/ada-bridge/push/<uuid>/` | Translate + push IEDA record to ADA |
+| POST | `/api/ada-bridge/sync/<uuid>/` | Pull status + DOI from ADA |
+| GET | `/api/ada-bridge/status/<uuid>/` | Get ADA link info for an IEDA record |
+| POST | `/api/ada-bridge/bundle/introspect/` | Upload ZIP, return introspection results |
+| POST | `/api/ada-bridge/bundle/upload/<uuid>/` | Upload bundle to linked ADA record |
 
 #### Catalog Setup (Existing Installs)
 
@@ -229,6 +246,17 @@ docker exec catalog python manage.py load_profiles
 ```
 
 Fresh installs handle database creation automatically via `scripts/init-catalog-db.sh`.
+
+#### ADA Bridge Setup
+
+To enable pushing records to ADA, set these environment variables:
+
+```bash
+ADA_API_BASE_URL=http://ada-api:8000   # Base URL of the ADA REST API
+ADA_API_KEY=your-ada-api-key-here      # API key from ADA's Django admin
+```
+
+The bridge will work without these settings (push/sync calls will fail gracefully), so they're only needed when integrating with a running ADA instance.
 
 ### dspfront — Frontend Application
 
