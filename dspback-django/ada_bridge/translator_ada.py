@@ -391,3 +391,194 @@ def compute_payload_checksum(payload: dict) -> str:
     """
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+# ---------------------------------------------------------------------------
+# Reverse translator — ADA API -> JSON-LD
+# ---------------------------------------------------------------------------
+
+def _reverse_creators(ada_creators: list) -> List[Dict[str, Any]]:
+    """ADA ``creators[]`` -> ``schema:creator`` JSON-LD."""
+    result = []
+    for c in ada_creators:
+        ne = c.get("nameEntity") or c.get("name_entity") or {}
+        person: Dict[str, Any] = {"@type": "schema:Person"}
+
+        full_name = ne.get("fullName") or ne.get("full_name", "")
+        if full_name:
+            person["schema:name"] = full_name
+
+        given = ne.get("givenName") or ne.get("given_name", "")
+        if given:
+            person["schema:givenName"] = given
+
+        family = ne.get("familyName") or ne.get("family_name", "")
+        if family:
+            person["schema:familyName"] = family
+
+        name_type = ne.get("nameType") or ne.get("name_type", "")
+        if name_type == "Organizational":
+            person["@type"] = "schema:Organization"
+
+        orcid = ne.get("orcid", "")
+        if orcid:
+            person["schema:identifier"] = orcid
+
+        result.append(person)
+    return result
+
+
+def _reverse_contributors(ada_contributors: list) -> List[Dict[str, Any]]:
+    """ADA ``contributors[]`` -> ``schema:contributor`` JSON-LD."""
+    result = []
+    for c in ada_contributors:
+        ne = c.get("nameEntity") or c.get("name_entity") or {}
+        person: Dict[str, Any] = {"@type": "schema:Person"}
+
+        full_name = ne.get("fullName") or ne.get("full_name", "")
+        if full_name:
+            person["schema:name"] = full_name
+
+        given = ne.get("givenName") or ne.get("given_name", "")
+        if given:
+            person["schema:givenName"] = given
+
+        family = ne.get("familyName") or ne.get("family_name", "")
+        if family:
+            person["schema:familyName"] = family
+
+        contributor_type = c.get("contributorType") or c.get("contributor_type", "")
+        if contributor_type:
+            # Wrap in a Role
+            entry: Dict[str, Any] = {
+                "@type": "schema:Role",
+                "schema:roleName": contributor_type,
+                "schema:contributor": person,
+            }
+            result.append(entry)
+        else:
+            result.append(person)
+    return result
+
+
+def _reverse_funding(ada_funding: list) -> List[Dict[str, Any]]:
+    """ADA ``funding[]`` -> ``schema:funding`` JSON-LD."""
+    result = []
+    for f in ada_funding:
+        grant: Dict[str, Any] = {"@type": "schema:MonetaryGrant"}
+
+        funder = f.get("funder", {})
+        funder_name = funder.get("name", "") if isinstance(funder, dict) else str(funder)
+        if funder_name:
+            grant["schema:funder"] = {"@type": "schema:Organization", "schema:name": funder_name}
+
+        award_num = f.get("awardNumber") or f.get("award_number", "")
+        if award_num:
+            grant["schema:identifier"] = award_num
+
+        award_title = f.get("awardTitle") or f.get("award_title", "")
+        if award_title:
+            grant["schema:name"] = award_title
+
+        result.append(grant)
+    return result
+
+
+def _reverse_licenses(ada_licenses: list) -> List[Dict[str, Any]]:
+    """ADA ``licenses[]`` -> ``schema:license`` JSON-LD."""
+    result = []
+    for lic in ada_licenses:
+        if isinstance(lic, str):
+            result.append({"@type": "schema:CreativeWork", "schema:name": lic})
+        elif isinstance(lic, dict):
+            entry: Dict[str, Any] = {"@type": "schema:CreativeWork"}
+            if lic.get("name"):
+                entry["schema:name"] = lic["name"]
+            if lic.get("url"):
+                entry["schema:url"] = lic["url"]
+            if lic.get("description"):
+                entry["schema:description"] = lic["description"]
+            result.append(entry)
+    return result
+
+
+def ada_to_jsonld(ada_record: dict) -> dict:
+    """
+    Reverse-translate an ADA API record into a schema:-prefixed JSON-LD document.
+
+    This is the inverse of ``jsonld_to_ada()``.  It maps ADA camelCase fields
+    back to JSON-LD with ``schema:`` prefixes.
+
+    Parameters
+    ----------
+    ada_record : dict
+        The JSON response from ``GET /api/record/{doi}``.
+
+    Returns
+    -------
+    dict
+        A JSON-LD document suitable for loading into the metadata form.
+    """
+    jsonld: Dict[str, Any] = {
+        "@context": {"schema": "https://schema.org/"},
+        "@type": "schema:Dataset",
+    }
+
+    # Scalar fields
+    title = ada_record.get("title", "")
+    if title:
+        jsonld["schema:name"] = title
+
+    description = ada_record.get("description", "")
+    if description:
+        jsonld["schema:description"] = description
+
+    specific_type = ada_record.get("specificType") or ada_record.get("specific_type", "")
+    if specific_type:
+        jsonld["schema:additionalType"] = specific_type
+
+    pub_date = ada_record.get("publicationDate") or ada_record.get("publication_date", "")
+    if pub_date:
+        jsonld["schema:datePublished"] = pub_date
+
+    doi = ada_record.get("doi", "")
+    if doi:
+        jsonld["schema:identifier"] = {
+            "@type": "schema:PropertyValue",
+            "schema:propertyID": "DOI",
+            "schema:value": doi,
+        }
+
+    # Nested fields
+    creators = ada_record.get("creators", [])
+    if creators:
+        jsonld["schema:creator"] = _reverse_creators(creators)
+
+    contributors = ada_record.get("contributors", [])
+    if contributors:
+        jsonld["schema:contributor"] = _reverse_contributors(contributors)
+
+    funding = ada_record.get("funding", [])
+    if funding:
+        jsonld["schema:funding"] = _reverse_funding(funding)
+
+    licenses = ada_record.get("licenses", [])
+    if licenses:
+        jsonld["schema:license"] = _reverse_licenses(licenses)
+
+    # Files -> distribution
+    files = ada_record.get("files", [])
+    if files:
+        distributions = []
+        for f in files:
+            dist: Dict[str, Any] = {"@type": "schema:DataDownload"}
+            name = f.get("name", "")
+            if name:
+                dist["schema:name"] = name
+            ext = f.get("extension", "")
+            if ext:
+                dist["schema:encodingFormat"] = ext
+            distributions.append(dist)
+        jsonld["schema:distribution"] = distributions
+
+    return jsonld

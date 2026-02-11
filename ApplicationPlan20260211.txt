@@ -1,0 +1,166 @@
+# ADA Bundle Integration Plan
+
+## Overview
+Integrate ADA bundle ingestion into IEDADataSubmission, enabling users to upload data bundles, introspect file contents, fill metadata forms driven by OGC Building Block profiles, save to the local catalog, and push metadata to the ADA API. This is a **metadata-only** integration — no S3 bundle push.
+
+---
+
+## Phase 1: Landing Page & Routing Changes
+
+### Files to modify:
+- `dspfront/src/components/submit/constants.ts` — reorder `repoMetadata` (ADA first, HydroShare last)
+- `dspfront/src/components/submit/cz.submit.vue` — add "Update Existing Metadata" card, wire "Register Dataset" to open CDIF Discovery form
+- `dspfront/src/routes.ts` — add routes: `update-metadata`, `bundle-wizard`, `bundle-wizard-step`
+
+### Changes:
+1. **Reorder repository cards** in `repoMetadata`: ADA → EarthChem → Zenodo → OpenTopography → HydroShare
+2. **"Register Dataset" card** routes to CDIF Discovery form (existing `metadata-cdif` route)
+3. **Add "Update Existing Metadata" card** with icon and description, routes to new `update-metadata` route
+4. **Add new route definitions** for the bundle wizard flow and update-metadata flow
+
+---
+
+## Phase 2: Backend — Enhanced Bundle Introspection
+
+### Files to modify:
+- `dspback-django/ada_bridge/bundle_service.py` — rewrite to use full BundleProcessor from ada-metadata-forms
+- `dspback-django/ada_bridge/views.py` — add new API endpoints
+- `dspback-django/ada_bridge/urls.py` — register new endpoints
+- `dspback-django/ada_bridge/models.py` — add BundleSession model
+- `dspback-django/ada_bridge/serializers.py` — add BundleSession serializer
+
+### New model — `BundleSession`:
+```python
+class BundleSession(models.Model):
+    session_id = models.UUIDField(default=uuid.uuid4, unique=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
+    bundle_path = models.CharField(max_length=500)  # temp file path or URL
+    product_yaml = models.JSONField(null=True)       # parsed product.yaml if found
+    introspection_result = models.JSONField(null=True) # file inspection results
+    jsonld_draft = models.JSONField(null=True)        # in-progress JSON-LD
+    profile_id = models.CharField(max_length=100, null=True)
+    status = models.CharField(max_length=20, default='created')  # created/introspecting/ready/submitted
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+```
+
+### New API endpoints:
+1. **`POST /api/ada-bridge/bundle/upload/`** — Accept ZIP file or URL, create BundleSession, return session_id
+2. **`POST /api/ada-bridge/bundle/{session_id}/introspect/`** — Run BundleProcessor (two-phase: with/without product.yaml)
+3. **`GET /api/ada-bridge/bundle/{session_id}/`** — Get session state including introspection results
+4. **`PATCH /api/ada-bridge/bundle/{session_id}/`** — Update product_yaml or jsonld_draft
+5. **`POST /api/ada-bridge/bundle/{session_id}/submit/`** — Save to catalog + push to ADA
+
+### Bundle processing flow:
+1. Upload ZIP → extract to temp dir → check for product.yaml
+2. If product.yaml found: parse it, run full `BundleProcessor.process()`, return file details + generated JSON-LD
+3. If product.yaml missing: run file inspectors only (CSV columns/types/min-max, image dimensions, HDF5/NetCDF variables), return inspection results for wizard UI
+4. User fills in missing product metadata via wizard → backend generates product.yaml → re-run full processing
+
+### Dependency:
+- `ada-metadata-forms` must be pip-installable. Add to `requirements.txt` with path or git reference. Already conditionally imported in existing `bundle_service.py`.
+
+---
+
+## Phase 3: Frontend — ADA Bundle Wizard
+
+### New files to create:
+- `dspfront/src/components/bundle/BundleWizard.vue` — main wizard container with stepper
+- `dspfront/src/components/bundle/BundleUploadStep.vue` — file upload / URL input
+- `dspfront/src/components/bundle/ProductFormStep.vue` — product.yaml form (shown only if missing)
+- `dspfront/src/components/bundle/FileReviewStep.vue` — file introspection results + componentType assignment
+- `dspfront/src/components/bundle/MetadataFormStep.vue` — JSON-LD form (reuses CzForm pattern)
+- `dspfront/src/components/bundle/BundleReviewStep.vue` — final review before submit
+
+### Wizard steps:
+1. **Upload** — Drag-drop ZIP or paste URL. On upload, calls `POST /bundle/upload/` then `POST /bundle/{id}/introspect/`
+2. **Product Metadata** (conditional) — Only shown if no product.yaml found. Form fields: title, description, creators, keywords, license, fundingReferences. On save, calls `PATCH /bundle/{id}/` with product_yaml
+3. **File Review** — Table of files with: filename, detected MIME type, size, inspection summary (e.g., "CSV: 15 columns, 1200 rows"). Each file has a ComponentType dropdown filtered by encodingFormat (uses `DATA_COMPONENT_TYPE_MAP` from ada-metadata-forms). User can exclude files.
+4. **Metadata Form** — Profile selection (fetches `/api/catalog/profiles/`), then renders CzForm with the profile's JSON Schema + UISchema. Pre-populated from introspection results. Includes variable management and physical mapping for tabular/scientific files.
+5. **Review & Submit** — Summary of all metadata. "Save to Catalog" and "Save & Push to ADA" buttons.
+
+### Key UI patterns to reuse:
+- `CzForm` component from `@cznethub/cznet-vue-core` (same as ada-profile-form.vue)
+- Profile fetching from `/api/catalog/profiles/` (same as ada-select-type.vue)
+- Variable management pattern from `ada-profile-form.vue` (extract to shared composable)
+- Vuetify `v-stepper` for wizard flow
+
+### Shared composable to extract:
+- `useVariableManagement()` — from ada-profile-form.vue's variable add/remove/edit logic
+- Used by both ada-profile-form.vue (existing) and MetadataFormStep.vue (new)
+
+---
+
+## Phase 4: Submit to ADA Integration
+
+### Files to modify:
+- `dspback-django/ada_bridge/services.py` — add `submit_bundle_session()` function
+- `dspback-django/ada_bridge/translator_ada.py` — ensure bundle JSON-LD translates correctly
+- `dspback-django/catalog/views.py` or models — save wizard result as catalog record
+
+### Flow:
+1. Wizard "Save to Catalog" → create/update CatalogRecord with JSON-LD from wizard
+2. Wizard "Save & Push to ADA" → save to catalog + call `push_record_to_ada()` from existing services.py
+3. If ADA returns a DOI → store in AdaRecordLink
+4. **Dummy DOI fallback**: If ADA DOI generation fails or is not yet available, generate a placeholder DOI format (`doi:10.xxxxx/placeholder-{uuid}`) and store with status `pending_doi`. Display warning to user.
+
+---
+
+## Phase 5: Update Existing Metadata Flow
+
+### New files to create:
+- `dspfront/src/components/metadata/UpdateMetadata.vue` — landing page for update flow
+
+### Files to modify:
+- `dspback-django/ada_bridge/views.py` — add DOI lookup endpoint
+- `dspback-django/ada_bridge/translator_ada.py` — add `ada_to_jsonld()` reverse translator
+
+### Three update paths:
+1. **By DOI** — Enter DOI → fetch record from ADA API via `GET /records/?doi={doi}` → reverse-translate to JSON-LD → open in profile form for editing → save + push updates
+2. **From local file** — Upload existing JSON-LD file → load into profile form
+3. **From URL** — Fetch JSON-LD from URL → load into profile form
+
+### Reverse translator (`ada_to_jsonld()`):
+- Inverse of `jsonld_to_ada()` in translator_ada.py
+- Maps ADA camelCase fields back to `schema:` prefixed JSON-LD
+- Used when fetching existing records from ADA for editing
+
+---
+
+## Phase 6: Physical Mapping Builder Enhancement
+
+### Files to modify:
+- `dspfront/src/components/metadata/geodat.ada-profile-form.vue` — enhance existing physical mapping
+- Potentially the new `MetadataFormStep.vue` — include physical mapping in wizard
+
+### Enhancement:
+- Current physical mapping has progressive disclosure with friendly labels and variable combobox (per commit `dc34861`)
+- Extend to auto-populate from file introspection results: CSV column names become variable candidates, HDF5/NetCDF variable names become candidates
+- Add componentType-aware filtering: only show relevant mapping options for the file's detected type
+
+---
+
+## Implementation Order & Dependencies
+
+```
+Phase 1 (Landing Page)     — no dependencies, can start immediately
+Phase 2 (Backend)          — no dependencies, can start immediately
+Phase 3 (Bundle Wizard)    — depends on Phase 2 endpoints
+Phase 4 (Submit to ADA)    — depends on Phase 2 + Phase 3
+Phase 5 (Update Metadata)  — depends on Phase 2 (reverse translator)
+Phase 6 (Physical Mapping) — depends on Phase 3 (wizard context)
+```
+
+**Phases 1 and 2 can be built in parallel.** Phase 3 follows once Phase 2 endpoints are ready. Phases 4-6 build on earlier phases sequentially.
+
+---
+
+## Files NOT touched (user updating separately):
+- `OCGbuildingBlockTest/` — user is updating building blocks in parallel
+- OGC BB build outputs — will be consumed as-is via `/api/catalog/profiles/`
+
+## Key assumptions:
+- `ada-metadata-forms` package is installable (pip install from local path or git)
+- OGC BB profiles will be available at `/api/catalog/profiles/` endpoint (existing)
+- ADA API is accessible at the URL configured in `.env` (`ADA_API_BASE_URL`)
+- No S3 bundle upload needed — metadata-only push via ada_bridge

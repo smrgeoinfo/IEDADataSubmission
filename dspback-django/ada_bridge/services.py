@@ -8,15 +8,17 @@ high-level operations exposed by the API views.
 from __future__ import annotations
 
 import logging
+import os
 import tempfile
-from typing import Any, Dict
+import uuid
+from typing import Any, Dict, Optional
 
 from django.core.files.uploadedfile import UploadedFile
 from django.utils import timezone
 
 from ada_bridge.bundle_service import introspect_bundle
 from ada_bridge.client import AdaClient
-from ada_bridge.models import AdaRecordLink
+from ada_bridge.models import AdaRecordLink, BundleSession
 from ada_bridge.translator_ada import (
     ada_to_jsonld_status,
     compute_payload_checksum,
@@ -199,9 +201,157 @@ def upload_bundle_and_introspect(
 
         return result
     finally:
-        import os
-
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Session-based bundle services
+# ---------------------------------------------------------------------------
+
+
+def create_bundle_session(
+    user,
+    file_obj: Optional[UploadedFile] = None,
+    url: Optional[str] = None,
+) -> BundleSession:
+    """
+    Create a BundleSession from an uploaded file or URL.
+
+    Saves the uploaded file to a temp location and creates a session record.
+    If a URL is provided, downloads it first.
+
+    Returns
+    -------
+    BundleSession
+        The newly created session.
+    """
+    if file_obj:
+        suffix = ".zip"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=tempfile.gettempdir()) as tmp:
+            for chunk in file_obj.chunks():
+                tmp.write(chunk)
+            tmp_path = tmp.name
+    elif url:
+        import requests as req
+
+        resp = req.get(url, stream=True, timeout=120)
+        resp.raise_for_status()
+        suffix = ".zip"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=tempfile.gettempdir()) as tmp:
+            for chunk in resp.iter_content(chunk_size=8192):
+                tmp.write(chunk)
+            tmp_path = tmp.name
+    else:
+        raise ValueError("Either 'file' or 'url' must be provided.")
+
+    session = BundleSession.objects.create(
+        user=user if user.is_authenticated else None,
+        bundle_path=tmp_path,
+        status=BundleSession.Status.CREATED,
+    )
+    logger.info("Created bundle session %s from %s", session.session_id, "upload" if file_obj else url)
+    return session
+
+
+def introspect_bundle_session(session: BundleSession) -> BundleSession:
+    """
+    Run introspection on a bundle session's file.
+
+    1. Check for product.yaml in the bundle
+    2. Run file inspectors
+    3. If product_yaml is set on the session, use it for full processing
+    4. Store results in the session
+
+    Returns
+    -------
+    BundleSession
+        The updated session with introspection_result populated.
+    """
+    if not os.path.isfile(session.bundle_path):
+        raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
+
+    session.status = BundleSession.Status.INTROSPECTING
+    session.save(update_fields=["status", "updated_at"])
+
+    # Run introspection
+    result = introspect_bundle(session.bundle_path)
+
+    # Check for product.yaml in the manifest
+    product_yaml_found = False
+    for filepath in result.get("manifest", []):
+        basename = os.path.basename(filepath).lower()
+        if basename in ("product.yaml", "product.yml"):
+            product_yaml_found = True
+            # Try to parse it
+            try:
+                import zipfile
+                import yaml
+
+                with zipfile.ZipFile(session.bundle_path, "r") as zf:
+                    with zf.open(filepath) as f:
+                        product_data = yaml.safe_load(f)
+                        if isinstance(product_data, dict):
+                            session.product_yaml = product_data
+            except Exception:
+                logger.exception("Failed to parse product.yaml from bundle")
+            break
+
+    session.introspection_result = result
+    session.status = BundleSession.Status.READY
+    session.save(update_fields=["product_yaml", "introspection_result", "status", "updated_at"])
+
+    logger.info(
+        "Introspected bundle session %s: %d files, product.yaml=%s",
+        session.session_id,
+        len(result.get("manifest", [])),
+        "found" if product_yaml_found else "missing",
+    )
+    return session
+
+
+def submit_bundle_session(
+    session: BundleSession,
+    catalog_record_id=None,
+) -> Dict[str, Any]:
+    """
+    Submit a bundle session: push the associated catalog record to ADA.
+
+    Parameters
+    ----------
+    session : BundleSession
+        The bundle session to submit.
+    catalog_record_id : optional
+        Existing catalog record ID. If provided, push that record to ADA.
+
+    Returns
+    -------
+    dict
+        Result including catalog_record_id and ADA push status.
+    """
+    result: Dict[str, Any] = {
+        "session_id": str(session.session_id),
+        "status": "submitted",
+    }
+
+    if catalog_record_id:
+        try:
+            link = push_record_to_ada(catalog_record_id)
+            result["ada_record_id"] = link.ada_record_id
+            result["ada_doi"] = link.ada_doi
+            result["ada_status"] = link.ada_status
+        except Record.DoesNotExist:
+            result["warning"] = "Catalog record not found; ADA push skipped."
+        except Exception as exc:
+            # Generate a placeholder DOI if ADA push fails
+            placeholder_doi = f"doi:10.xxxxx/placeholder-{uuid.uuid4()}"
+            result["warning"] = f"ADA push failed ({exc}); placeholder DOI assigned."
+            result["placeholder_doi"] = placeholder_doi
+            result["ada_status"] = "pending_doi"
+
+    session.status = BundleSession.Status.SUBMITTED
+    session.save(update_fields=["status", "updated_at"])
+
+    return result

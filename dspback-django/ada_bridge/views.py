@@ -2,32 +2,54 @@
 DRF views for the ADA Bridge API.
 
 Endpoints:
-    POST /api/ada-bridge/push/{record_id}/        — push record to ADA
-    POST /api/ada-bridge/sync/{record_id}/        — sync status from ADA
-    GET  /api/ada-bridge/status/{record_id}/      — get AdaRecordLink info
-    POST /api/ada-bridge/bundle/introspect/       — upload ZIP, return metadata
-    POST /api/ada-bridge/bundle/upload/{record_id}/ — upload bundle to linked ADA record
+    POST /api/ada-bridge/push/{record_id}/                — push record to ADA
+    POST /api/ada-bridge/sync/{record_id}/                — sync status from ADA
+    GET  /api/ada-bridge/status/{record_id}/              — get AdaRecordLink info
+    POST /api/ada-bridge/bundle/introspect/               — upload ZIP, return metadata (legacy)
+    POST /api/ada-bridge/bundle/upload/{record_id}/       — upload bundle to linked ADA record (legacy)
+    POST /api/ada-bridge/bundle/upload/                   — create BundleSession from upload
+    POST /api/ada-bridge/bundle/{session_id}/introspect/  — run introspection on session
+    GET  /api/ada-bridge/bundle/{session_id}/             — get session state
+    PATCH /api/ada-bridge/bundle/{session_id}/            — update session (product_yaml, jsonld_draft)
+    POST /api/ada-bridge/bundle/{session_id}/submit/      — save to catalog + push to ADA
+    GET  /api/ada-bridge/lookup/                          — look up ADA record by DOI
 """
+
+import logging
 
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from ada_bridge.client import AdaClientError
-from ada_bridge.models import AdaRecordLink
+from ada_bridge.client import AdaClient, AdaClientError
+from ada_bridge.models import AdaRecordLink, BundleSession
 from ada_bridge.serializers import (
     AdaRecordLinkSerializer,
+    BundleSessionSerializer,
+    BundleSessionUpdateSerializer,
+    BundleSubmitSerializer,
     BundleUploadSerializer,
     PushResponseSerializer,
     SyncResponseSerializer,
 )
 from ada_bridge.services import (
+    create_bundle_session,
+    introspect_bundle_session,
     push_record_to_ada,
+    submit_bundle_session,
     sync_ada_status,
     upload_bundle_and_introspect,
 )
+from ada_bridge.translator_ada import ada_to_jsonld
 from records.models import Record
+
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Existing push / sync / status views
+# ---------------------------------------------------------------------------
 
 
 @api_view(["POST"])
@@ -88,6 +110,11 @@ def status_view(request, record_id):
     return Response(serializer.data, status=status.HTTP_200_OK)
 
 
+# ---------------------------------------------------------------------------
+# Legacy bundle views (kept for backward compatibility)
+# ---------------------------------------------------------------------------
+
+
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
 @parser_classes([MultiPartParser])
@@ -96,7 +123,13 @@ def bundle_introspect_view(request):
     serializer = BundleUploadSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
-    file_obj = serializer.validated_data["file"]
+    file_obj = serializer.validated_data.get("file")
+    if not file_obj:
+        return Response(
+            {"detail": "File is required for this endpoint."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
     result = upload_bundle_and_introspect(file_obj)
     return Response(result, status=status.HTTP_200_OK)
 
@@ -109,7 +142,12 @@ def bundle_upload_view(request, record_id):
     serializer = BundleUploadSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
-    file_obj = serializer.validated_data["file"]
+    file_obj = serializer.validated_data.get("file")
+    if not file_obj:
+        return Response(
+            {"detail": "File is required for this endpoint."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     try:
         result = upload_bundle_and_introspect(file_obj, ieda_record_id=record_id)
@@ -120,3 +158,149 @@ def bundle_upload_view(request, record_id):
         )
 
     return Response(result, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# New session-based bundle endpoints
+# ---------------------------------------------------------------------------
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+@parser_classes([MultiPartParser])
+def bundle_session_upload_view(request):
+    """Accept a ZIP file or URL, create a BundleSession, return session_id."""
+    serializer = BundleUploadSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    try:
+        session = create_bundle_session(
+            user=request.user,
+            file_obj=serializer.validated_data.get("file"),
+            url=serializer.validated_data.get("url"),
+        )
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(
+        BundleSessionSerializer(session).data,
+        status=status.HTTP_201_CREATED,
+    )
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+def bundle_session_introspect_view(request, session_id):
+    """Run BundleProcessor / inspectors on the session's bundle."""
+    try:
+        session = BundleSession.objects.get(session_id=session_id)
+    except BundleSession.DoesNotExist:
+        return Response(
+            {"detail": "Bundle session not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    try:
+        session = introspect_bundle_session(session)
+    except FileNotFoundError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(BundleSessionSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(["GET", "PATCH"])
+@permission_classes([permissions.IsAuthenticated])
+def bundle_session_detail_view(request, session_id):
+    """Get or update a BundleSession."""
+    try:
+        session = BundleSession.objects.get(session_id=session_id)
+    except BundleSession.DoesNotExist:
+        return Response(
+            {"detail": "Bundle session not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    if request.method == "GET":
+        return Response(BundleSessionSerializer(session).data, status=status.HTTP_200_OK)
+
+    # PATCH
+    serializer = BundleSessionUpdateSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    if "product_yaml" in serializer.validated_data:
+        session.product_yaml = serializer.validated_data["product_yaml"]
+    if "jsonld_draft" in serializer.validated_data:
+        session.jsonld_draft = serializer.validated_data["jsonld_draft"]
+    if "profile_id" in serializer.validated_data:
+        session.profile_id = serializer.validated_data["profile_id"]
+
+    session.save()
+    return Response(BundleSessionSerializer(session).data, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+@parser_classes([JSONParser])
+def bundle_session_submit_view(request, session_id):
+    """Save bundle session to catalog and optionally push to ADA."""
+    try:
+        session = BundleSession.objects.get(session_id=session_id)
+    except BundleSession.DoesNotExist:
+        return Response(
+            {"detail": "Bundle session not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    serializer = BundleSubmitSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+
+    catalog_record_id = serializer.validated_data.get("catalog_record_id")
+
+    try:
+        result = submit_bundle_session(session, catalog_record_id=catalog_record_id)
+    except AdaClientError as exc:
+        return Response(
+            {"detail": "ADA API error.", "ada_error": exc.detail},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
+
+    return Response(result, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# DOI lookup (for Update Existing Metadata flow)
+# ---------------------------------------------------------------------------
+
+
+@api_view(["GET"])
+@permission_classes([permissions.IsAuthenticated])
+def doi_lookup_view(request):
+    """
+    Look up an ADA record by DOI and return its JSON-LD representation.
+
+    Query params:
+        doi — the DOI to look up
+    """
+    doi = request.query_params.get("doi", "").strip()
+    if not doi:
+        return Response(
+            {"detail": "Query parameter 'doi' is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        client = AdaClient()
+        ada_record = client.get_record(doi)
+        jsonld = ada_to_jsonld(ada_record)
+        return Response({"jsonld": jsonld, "ada_record": ada_record}, status=status.HTTP_200_OK)
+    except AdaClientError as exc:
+        return Response(
+            {"detail": "ADA API error.", "ada_error": exc.detail},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
