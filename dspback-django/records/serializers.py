@@ -58,6 +58,23 @@ _FILE_TYPE_PREFIX_RULES = [
 ]
 
 
+_CATEGORY_CT_PROPS = [
+    "_imageComponentType", "_tabularComponentType",
+    "_dataCubeComponentType", "_documentComponentType",
+]
+
+
+def _consolidate_component_type(file_detail):
+    """Map per-category UI props back to componentType.@type and strip them."""
+    selected = None
+    for prop in _CATEGORY_CT_PROPS:
+        val = file_detail.pop(prop, None)
+        if val and not selected:
+            selected = val
+    if selected:
+        file_detail.setdefault("componentType", {})["@type"] = selected
+
+
 def _infer_file_detail_type(component_type_value):
     """Infer fileDetail @type from a componentType @type string."""
     if not component_type_value:
@@ -304,6 +321,7 @@ class RecordSerializer(serializers.ModelSerializer):
                     # Clean physicalMapping items in fileDetail
                     fd = dist.get("fileDetail")
                     if isinstance(fd, dict):
+                        _consolidate_component_type(fd)
                         _clean_physical_mapping_items(fd)
 
                         # Infer fileDetail @type from componentType
@@ -326,6 +344,7 @@ class RecordSerializer(serializers.ModelSerializer):
                         if isinstance(part, dict):
                             part_fd = part.get("fileDetail")
                             if isinstance(part_fd, dict):
+                                _consolidate_component_type(part_fd)
                                 _clean_physical_mapping_items(part_fd)
 
         # Skip schema validation for draft records (imported data may not

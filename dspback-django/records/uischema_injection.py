@@ -116,6 +116,83 @@ MODEL_MIMES = ["model/obj", "model/stl"]
 VIDEO_MIMES = ["video/mp4", "video/quicktime"]
 
 # ---------------------------------------------------------------------------
+# Per-category componentType enum values (from building block schemas)
+# ---------------------------------------------------------------------------
+
+# image + imageMap building blocks — shown when IMAGE_MIMES selected
+IMAGE_COMPONENT_TYPES = [
+    # image building block
+    "ada:AIVAImage", "ada:EMPAImage", "ada:LITImage", "ada:STEMImage",
+    "ada:TEMImage", "ada:TEMPatternsImage", "ada:UVFMImage", "ada:VLMImage",
+    "ada:SEMEBSDGrainImage", "ada:SEMEDSElementalMap", "ada:SEMHRCLImage",
+    "ada:SEMImageCollection", "ada:TEMEDSImageCollection", "ada:NanoSIMSImage",
+    "ada:XANESImageStack", "ada:XANESStackOverviewImage",
+    "ada:XRDDiffractionPattern", "ada:ShapeModelImage",
+    # imageMap building block (additional unique types)
+    "ada:basemap", "ada:supplementalBasemap", "ada:L2MSOverviewImage",
+    "ada:NanoIRMap", "ada:SEMEBSDGrainImageMap", "ada:SEMHRCLMap",
+    "ada:SEMImageMap", "ada:NanoSIMSMap", "ada:XANESimage", "ada:VNMIROverviewImage",
+    "ada:EMPAQEATabular", "ada:EMPAImageCollection",
+]
+
+# tabularData building block — shown when TABULAR_MIMES selected
+TABULAR_COMPONENT_TYPES = [
+    "ada:AMSRawData", "ada:AMSProcessedData",
+    "ada:DSCResultsTabular", "ada:DSCHeatTabular",
+    "ada:EAIRMSCollection",
+    "ada:EMPAQEATabular",
+    "ada:FTICRMSTabular",
+    "ada:GPYCProcessedTabular", "ada:GPYCRawTabular",
+    "ada:HRICPMSProcessed", "ada:HRICPMSRaw",
+    "ada:ICPOESIntermediateTabular", "ada:ICPOESProcessedTabular", "ada:ICPOESRawTabular",
+    "ada:ICTabular",
+    "ada:LAFProcessed", "ada:LAFRaw",
+    "ada:MCICPMSTabular",
+    "ada:NanoIRBackground",
+    "ada:NanoSIMSTabular",
+    "ada:NGNSMSRaw", "ada:NGNSMSProcessed",
+    "ada:PSFDTabular",
+    "ada:QICPMSProcessedTabular", "ada:QICPMSRawTabular",
+    "ada:RAMANRawTabular",
+    "ada:RITOFNGMSTabular",
+    "ada:SEMEDSPointData", "ada:SIMSTabular",
+    "ada:STEMEDSTabular", "ada:STEMEELSTabular",
+    "ada:SVRUECTabular",
+    "ada:VNMIRSpectralPoint",
+    "ada:XANESRawTabular", "ada:XANESProcessedTabular",
+    "ada:XRDTabular",
+]
+
+# dataCube building block — shown when DATACUBE_MIMES selected
+DATACUBE_COMPONENT_TYPES = [
+    "ada:FTICRMSCube",
+    "ada:GCMSCollection", "ada:GCMSCube",
+    "ada:L2MSCube",
+    "ada:LCMSCollection",
+    "ada:SEMEBSDGrainImageMapCube", "ada:SEMEDSElementalMapsCube",
+    "ada:SEMEDSPointDataCube", "ada:SEMHRCLCube",
+    "ada:STEMEDSCube", "ada:STEMEDSTomo", "ada:STEMEELSCube",
+    "ada:VNMIRSpectralMap",
+]
+
+# document building block — shown when DOCUMENT_MIMES selected
+DOCUMENT_COMPONENT_TYPES = [
+    "ada:ARGTDocument",
+    "ada:calibrationFile", "ada:contextVideo",
+    "ada:logFile", "ada:methodDescription",
+    "ada:peaks", "ada:processingDescription",
+    "ada:QRISCalibrationFile",
+    "ada:samplePreparation", "ada:shapefiles",
+]
+
+# Generic types available in every category dropdown
+GENERIC_COMPONENT_TYPES = [
+    "ada:analysisLocation", "ada:annotatedProduct", "ada:contextPhotography",
+    "ada:areaOfInterest", "ada:instrumentMetadata", "ada:other",
+    "ada:plot", "ada:quickLook", "ada:report", "ada:visImage",
+]
+
+# ---------------------------------------------------------------------------
 # Per-profile MIME type filtering
 # ---------------------------------------------------------------------------
 
@@ -308,7 +385,7 @@ IMAGE_DETAIL_GROUP = {
     "label": "Image Details",
     "rule": _mime_and_download_rule(IMAGE_MIMES),
     "elements": [
-        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("_imageComponentType", "Component Type"),
         _fd_ctrl("acquisitionTime", "Acquisition Time"),
         {
             "type": "HorizontalLayout",
@@ -337,7 +414,7 @@ TABULAR_DETAIL_GROUP = {
     "label": "Tabular Data Details",
     "rule": _mime_and_download_rule(TABULAR_MIMES),
     "elements": [
-        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("_tabularComponentType", "Component Type"),
         {
             "type": "HorizontalLayout",
             "elements": [
@@ -377,7 +454,7 @@ DATACUBE_DETAIL_GROUP = {
     "label": "Data Cube Details",
     "rule": _mime_and_download_rule(DATACUBE_MIMES),
     "elements": [
-        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("_dataCubeComponentType", "Component Type"),
         {
             "type": "Control",
             "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
@@ -396,7 +473,7 @@ DOCUMENT_DETAIL_GROUP = {
     "label": "Document Details",
     "rule": _mime_and_download_rule(DOCUMENT_MIMES),
     "elements": [
-        _fd_ctrl("componentType", "Component Type"),
+        _fd_ctrl("_documentComponentType", "Component Type"),
         _fd_ctrl("schema:version", "Version"),
         _fd_ctrl("schema:isBasedOn", "Based On"),
     ],
@@ -591,7 +668,7 @@ HAS_PART_DETAIL = {
             "label": "Image Details",
             "rule": _hp_mime_rule(IMAGE_MIMES),
             "elements": [
-                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("_imageComponentType", "Component Type"),
                 _fd_ctrl("acquisitionTime", "Acquisition Time"),
                 {
                     "type": "HorizontalLayout",
@@ -620,7 +697,7 @@ HAS_PART_DETAIL = {
             "label": "Tabular Data Details",
             "rule": _hp_mime_rule(TABULAR_MIMES),
             "elements": [
-                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("_tabularComponentType", "Component Type"),
                 {
                     "type": "HorizontalLayout",
                     "elements": [
@@ -660,7 +737,7 @@ HAS_PART_DETAIL = {
             "label": "Data Cube Details",
             "rule": _hp_mime_rule(DATACUBE_MIMES),
             "elements": [
-                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("_dataCubeComponentType", "Component Type"),
                 {
                     "type": "Control",
                     "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
@@ -679,7 +756,7 @@ HAS_PART_DETAIL = {
             "label": "Document Details",
             "rule": _hp_mime_rule(DOCUMENT_MIMES),
             "elements": [
-                _fd_ctrl("componentType", "Component Type"),
+                _fd_ctrl("_documentComponentType", "Component Type"),
                 _fd_ctrl("schema:version", "Version"),
                 _fd_ctrl("schema:isBasedOn", "Based On"),
             ],
@@ -1120,6 +1197,15 @@ def inject_schema_defaults(schema, profile_name=None):
         dist_props.setdefault("schema:serviceType", {"type": "string"})
         dist_props.setdefault("schema:documentation", {"type": "string", "format": "uri"})
 
+        # Remove properties not covered by the ADA distribution uischema.
+        # These cause "No applicable renderer found" when CzForm tries to
+        # auto-render them in the flattened distribution layout.
+        if _is_ada_profile(profile_name):
+            for unused_prop in ["schema:provider", "schema:termsOfService",
+                                "schema:potentialAction", "resultTarget",
+                                "schema:result", "schema:relatedLink"]:
+                dist_props.pop(unused_prop, None)
+
         # Replace array encodingFormat with single string + MIME enum.
         # A distribution item describes one file with one MIME type;
         # single string enables simple {"const": "text/csv"} rule conditions.
@@ -1167,6 +1253,24 @@ def inject_schema_defaults(schema, profile_name=None):
                     "type": "string",
                     "description": "Variable name or @id reference",
                 }
+
+        # --- Per-category componentType properties ---
+        # Inject UI-only string properties with filtered enum lists so each
+        # MIME-type detail group shows only relevant componentType values
+        # instead of the full ~110-item list.
+        if _is_ada_profile(profile_name):
+            _CT_CATEGORIES = {
+                "_imageComponentType": IMAGE_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
+                "_tabularComponentType": TABULAR_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
+                "_dataCubeComponentType": DATACUBE_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
+                "_documentComponentType": DOCUMENT_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
+            }
+            for props_container in [dist_props, hp_props]:
+                fd_schema = props_container.get("fileDetail", {})
+                fd_props = fd_schema.get("properties", {})
+                if fd_props:
+                    for prop_name, enum_list in _CT_CATEGORIES.items():
+                        fd_props[prop_name] = {"type": "string", "enum": enum_list}
 
     return result
 
