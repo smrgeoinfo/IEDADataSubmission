@@ -266,12 +266,19 @@ def _mime_and_download_rule(mime_list):
 
 
 def _hp_mime_rule(mime_list):
-    """Build a SHOW rule: hasPart encodingFormat in mime_list."""
+    """Build a SHOW rule: hasPart encodingFormat in mime_list.
+
+    Uses OR with individual const conditions because CzForm does not
+    reliably support enum in rule conditions.
+    """
     return {
         "effect": "SHOW",
         "condition": {
-            "scope": "#/properties/schema:encodingFormat",
-            "schema": {"enum": mime_list},
+            "type": "OR",
+            "conditions": [
+                {"scope": "#/properties/schema:encodingFormat", "schema": {"const": mime}}
+                for mime in mime_list
+            ],
         },
     }
 
@@ -773,13 +780,7 @@ PHYSICAL_STRUCTURE_MIMES = TABULAR_MIMES + SPREADSHEET_MIMES + DATACUBE_MIMES
 BUNDLE_HAS_PART_DETAIL = {
     "type": "VerticalLayout",
     "elements": [
-        {
-            "type": "HorizontalLayout",
-            "elements": [
-                {"type": "Control", "scope": "#/properties/schema:name", "label": "File Name"},
-                {"type": "Control", "scope": "#/properties/schema:additionalType", "label": "Component Type"},
-            ],
-        },
+        {"type": "Control", "scope": "#/properties/schema:name", "label": "File Name"},
         {
             "type": "HorizontalLayout",
             "elements": [
@@ -788,6 +789,31 @@ BUNDLE_HAS_PART_DETAIL = {
             ],
         },
         {"type": "Control", "scope": "#/properties/schema:description", "label": "Description", "options": {"multi": True, "rows": 2, "autoGrow": True}},
+        # MIME-type-gated Component Type dropdowns (filtered per file category)
+        {
+            "type": "Group",
+            "label": "Image Details",
+            "rule": _hp_mime_rule(IMAGE_MIMES),
+            "elements": [_fd_ctrl("_imageComponentType", "Component Type")],
+        },
+        {
+            "type": "Group",
+            "label": "Tabular Data Details",
+            "rule": _hp_mime_rule(TABULAR_MIMES),
+            "elements": [_fd_ctrl("_tabularComponentType", "Component Type")],
+        },
+        {
+            "type": "Group",
+            "label": "Data Cube Details",
+            "rule": _hp_mime_rule(DATACUBE_MIMES),
+            "elements": [_fd_ctrl("_dataCubeComponentType", "Component Type")],
+        },
+        {
+            "type": "Group",
+            "label": "Document Details",
+            "rule": _hp_mime_rule(DOCUMENT_MIMES),
+            "elements": [_fd_ctrl("_documentComponentType", "Component Type")],
+        },
         # Toggle — only visible for tabular/spreadsheet/datacube MIME types.
         # Uses OR with individual const conditions (enum not reliably supported
         # in CzForm rule conditions).
