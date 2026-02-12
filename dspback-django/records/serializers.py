@@ -1,4 +1,6 @@
 import copy
+import json
+import re
 import uuid
 
 from rest_framework import serializers
@@ -168,6 +170,33 @@ def _relax_type_constraints(schema):
     # (additionalProperties is not set, so extra keys are fine.)
 
     return result
+
+
+def _jsonld_equal(a: dict, b: dict) -> bool:
+    """Compare two JSON-LD documents ignoring volatile auto-populated fields."""
+    def _strip_volatile(d):
+        d = copy.deepcopy(d)
+        d.pop("@id", None)
+        so = d.get("schema:subjectOf", {})
+        if isinstance(so, dict):
+            so.pop("schema:about", None)
+            so.pop("schema:sdDatePublished", None)
+            so.pop("@id", None)
+        d.pop("schema:dateModified", None)
+        return d
+    return json.dumps(_strip_volatile(a), sort_keys=True) == json.dumps(_strip_volatile(b), sort_keys=True)
+
+
+def _next_version_identifier(base_identifier: str) -> str:
+    """Find next available _N suffix for a base identifier."""
+    base = re.sub(r'_\d+$', '', base_identifier)
+    existing = Record.objects.filter(identifier__regex=rf'^{re.escape(base)}(_\d+)?$')
+    max_ver = 1  # original (no suffix) is implicitly version 1
+    for rec in existing:
+        m = re.search(r'_(\d+)$', rec.identifier)
+        if m:
+            max_ver = max(max_ver, int(m.group(1)))
+    return f"{base}_{max_ver + 1}"
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -370,17 +399,37 @@ class RecordSerializer(serializers.ModelSerializer):
 
         upsert_known_entities(jsonld)
 
-        # Upsert: if a record with this identifier already exists for this
-        # user, update it instead of raising a duplicate-key error.
-        # If it belongs to a different user, mint a fresh identifier.
+        # Versioning: look up the whole identifier family (base + _N
+        # variants) owned by this user.  Compare the newest active
+        # version's JSON-LD with the import.
+        #   - Identical  → return existing record unchanged.
+        #   - Different  → deprecate all active versions, create _N+1.
+        # If the identifier is owned by a different user, mint a UUID.
         identifier = validated_data["identifier"]
         existing = Record.objects.filter(identifier=identifier).first()
         if existing:
             if existing.owner_id == user.id:
-                for key, value in validated_data.items():
-                    setattr(existing, key, value)
-                existing.save()
-                return existing
+                base = re.sub(r'_\d+$', '', identifier)
+                family = Record.objects.filter(
+                    identifier__regex=rf'^{re.escape(base)}(_\d+)?$',
+                    owner=user,
+                )
+                latest = family.exclude(status="deprecated").order_by("-updated_at").first()
+
+                # Same JSON-LD as latest active → reuse, no new version
+                if latest and _jsonld_equal(latest.jsonld, jsonld):
+                    return latest
+
+                # Different → deprecate all active versions
+                family.exclude(status="deprecated").update(status="deprecated")
+
+                new_id = _next_version_identifier(identifier)
+                validated_data["identifier"] = new_id
+
+                # Update @id and subjectOf/about in jsonld to match
+                jsonld["@id"] = new_id
+                if jsonld.get("schema:subjectOf"):
+                    jsonld["schema:subjectOf"]["schema:about"] = {"@id": new_id}
             else:
                 # Identifier taken by another user — assign a new one
                 validated_data["identifier"] = str(uuid.uuid4())
@@ -394,7 +443,19 @@ class RecordSerializer(serializers.ModelSerializer):
             validated_data["title"] = fields["title"]
             validated_data["creators"] = fields["creators"]
             if fields["identifier"]:
-                validated_data["identifier"] = fields["identifier"]
+                new_id = fields["identifier"]
+                # Check conflict with a DIFFERENT record
+                conflict = (Record.objects.filter(identifier=new_id)
+                            .exclude(id=instance.id).first())
+                if conflict and conflict.owner_id == instance.owner_id:
+                    conflict.status = "deprecated"
+                    conflict.save(update_fields=["status"])
+                    new_id = _next_version_identifier(new_id)
+                    # Update @id and subjectOf in jsonld
+                    jsonld["@id"] = new_id
+                    if jsonld.get("schema:subjectOf"):
+                        jsonld["schema:subjectOf"]["schema:about"] = {"@id": new_id}
+                validated_data["identifier"] = new_id
             upsert_known_entities(jsonld)
 
         return super().update(instance, validated_data)

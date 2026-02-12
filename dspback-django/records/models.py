@@ -38,6 +38,7 @@ class Record(models.Model):
     class Status(models.TextChoices):
         DRAFT = "draft", "Draft"
         PUBLISHED = "published", "Published"
+        DEPRECATED = "deprecated", "Deprecated"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     profile = models.ForeignKey(

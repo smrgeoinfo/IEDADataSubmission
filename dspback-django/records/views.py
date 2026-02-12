@@ -129,6 +129,11 @@ class RecordViewSet(viewsets.ModelViewSet):
         if record_status:
             qs = qs.filter(status=record_status)
 
+        # Exclude by status (e.g., ?exclude_status=deprecated)
+        exclude_status = self.request.query_params.get("exclude_status")
+        if exclude_status:
+            qs = qs.exclude(status=exclude_status)
+
         return qs
 
     @action(detail=True, methods=["get"], url_path="jsonld")

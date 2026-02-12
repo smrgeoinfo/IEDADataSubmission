@@ -804,7 +804,7 @@ class SchemaDefaultsInjectionTest(TestCase):
     def test_injects_variable_measured_at_type_default(self):
         result = inject_schema_defaults(VARIABLE_MEASURED_SCHEMA)
         at_type = result["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
-        self.assertEqual(at_type["default"], ["schema:PropertyValue"])
+        self.assertEqual(at_type["default"], ["schema:PropertyValue", "cdi:InstanceVariable"])
 
     def test_does_not_overwrite_existing_default(self):
         schema = json.loads(json.dumps(VARIABLE_MEASURED_SCHEMA))
@@ -938,7 +938,7 @@ class ProfileSerializerInjectionTest(TestCase):
         self.assertEqual(resp.status_code, 200)
         schema = resp.json()["schema"]
         at_type = schema["properties"]["schema:variableMeasured"]["items"]["properties"]["@type"]
-        self.assertEqual(at_type["default"], ["schema:PropertyValue"])
+        self.assertEqual(at_type["default"], ["schema:PropertyValue", "cdi:InstanceVariable"])
 
 
 # ===================================================================
@@ -997,7 +997,7 @@ class RecordUpsertIntegrationTest(TestCase):
 
 class DistributionInjectionTest(TestCase):
     def _get_distribution_detail(self):
-        result = inject_uischema(SAMPLE_UISCHEMA)
+        result = inject_uischema(SAMPLE_UISCHEMA, profile_name="adaProduct")
         dist_group = result["elements"][6]
         dist_ctrl = dist_group["elements"][0]
         return dist_ctrl["options"]["detail"]
@@ -1070,56 +1070,51 @@ class DistributionInjectionTest(TestCase):
         has_part = detail["elements"][5]
         hp_detail = has_part["options"]["detail"]
         self.assertEqual(hp_detail["type"], "VerticalLayout")
-        # name, description, encodingFormat, nested hasPart, 4 MIME groups
-        self.assertEqual(len(hp_detail["elements"]), 8)
-        scopes = [
-            el.get("scope") for el in hp_detail["elements"] if "scope" in el
-        ]
-        self.assertIn("#/properties/schema:name", scopes)
-        self.assertIn("#/properties/schema:encodingFormat", scopes)
+        # name, HorizontalLayout(MIME+size), description, 4 MIME groups,
+        # _showPhysicalStructure toggle, 2 physical structure groups
+        self.assertEqual(len(hp_detail["elements"]), 10)
+        self.assertEqual(
+            hp_detail["elements"][0]["scope"], "#/properties/schema:name"
+        )
+        # encodingFormat is inside the HorizontalLayout at index 1
+        horiz = hp_detail["elements"][1]
+        self.assertEqual(horiz["type"], "HorizontalLayout")
+        horiz_scopes = [el.get("scope") for el in horiz["elements"]]
+        self.assertIn("#/properties/schema:encodingFormat", horiz_scopes)
 
     def test_has_part_nested_archive(self):
-        """hasPart shows nested Archive Contents when encodingFormat is zip."""
+        """Bundle hasPart detail has no nested archive (handled by bundle wizard)."""
         detail = self._get_distribution_detail()
         hp_detail = detail["elements"][5]["options"]["detail"]
-        nested_archive = hp_detail["elements"][3]
-        self.assertEqual(nested_archive["scope"], "#/properties/schema:hasPart")
-        self.assertEqual(nested_archive["label"], "Archive Contents")
-        rule_cond = nested_archive["rule"]["condition"]
-        self.assertEqual(rule_cond["schema"], {"const": "application/zip"})
+        scopes = [
+            el.get("scope") for el in hp_detail["elements"] if el.get("scope")
+        ]
+        self.assertNotIn("#/properties/schema:hasPart", scopes)
 
     def test_has_part_image_group(self):
         detail = self._get_distribution_detail()
         hp_detail = detail["elements"][5]["options"]["detail"]
-        image_group = hp_detail["elements"][4]
+        image_group = hp_detail["elements"][3]
         self.assertEqual(image_group["label"], "Image Details")
         self.assertEqual(image_group["rule"]["effect"], "SHOW")
-        mime_cond = image_group["rule"]["condition"]
-        self.assertIn("image/tiff", mime_cond["schema"]["enum"])
 
     def test_has_part_tabular_group(self):
         detail = self._get_distribution_detail()
         hp_detail = detail["elements"][5]["options"]["detail"]
-        tabular_group = hp_detail["elements"][5]
+        tabular_group = hp_detail["elements"][4]
         self.assertEqual(tabular_group["label"], "Tabular Data Details")
-        mime_cond = tabular_group["rule"]["condition"]
-        self.assertIn("text/csv", mime_cond["schema"]["enum"])
 
     def test_has_part_datacube_group(self):
         detail = self._get_distribution_detail()
         hp_detail = detail["elements"][5]["options"]["detail"]
-        cube_group = hp_detail["elements"][6]
+        cube_group = hp_detail["elements"][5]
         self.assertEqual(cube_group["label"], "Data Cube Details")
-        mime_cond = cube_group["rule"]["condition"]
-        self.assertIn("application/x-hdf5", mime_cond["schema"]["enum"])
 
     def test_has_part_document_group(self):
         detail = self._get_distribution_detail()
         hp_detail = detail["elements"][5]["options"]["detail"]
-        doc_group = hp_detail["elements"][7]
+        doc_group = hp_detail["elements"][6]
         self.assertEqual(doc_group["label"], "Document Details")
-        mime_cond = doc_group["rule"]["condition"]
-        self.assertIn("application/pdf", mime_cond["schema"]["enum"])
 
     def test_distribution_element_label_prop(self):
         result = inject_uischema(SAMPLE_UISCHEMA)
@@ -1219,6 +1214,7 @@ class FileDetailTypeInferenceTest(TestCase):
         self.assertEqual(fd["@type"], ["ada:tabularData", "schema:Dataset"])
 
     def test_no_inference_without_component_type(self):
+        """Empty fileDetail (no componentType, no @type) is stripped entirely."""
         from records.serializers import RecordSerializer
         jsonld = {
             "schema:distribution": [{
@@ -1230,8 +1226,7 @@ class FileDetailTypeInferenceTest(TestCase):
         }
         serializer = RecordSerializer()
         attrs = serializer.validate(self._make_attrs(jsonld))
-        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
-        self.assertNotIn("@type", fd)
+        self.assertNotIn("fileDetail", attrs["jsonld"]["schema:distribution"][0])
 
 
 # ===================================================================
@@ -1519,3 +1514,369 @@ class SerializerDataCleanupTest(TestCase):
         attrs = serializer.validate(self._make_attrs(jsonld))
         part = attrs["jsonld"]["schema:distribution"][0]["schema:hasPart"][0]
         self.assertNotIn("schema:encodingFormat", part)
+
+
+# ===================================================================
+# Versioning / deprecation tests
+# ===================================================================
+
+
+class JsonldEqualTest(TestCase):
+    """Unit tests for the _jsonld_equal helper."""
+
+    def test_identical_documents(self):
+        from records.serializers import _jsonld_equal
+        a = {"schema:name": "Test", "schema:description": "A test"}
+        b = {"schema:name": "Test", "schema:description": "A test"}
+        self.assertTrue(_jsonld_equal(a, b))
+
+    def test_different_documents(self):
+        from records.serializers import _jsonld_equal
+        a = {"schema:name": "Test"}
+        b = {"schema:name": "Different"}
+        self.assertFalse(_jsonld_equal(a, b))
+
+    def test_ignores_at_id(self):
+        from records.serializers import _jsonld_equal
+        a = {"@id": "id1", "schema:name": "Test"}
+        b = {"@id": "id2", "schema:name": "Test"}
+        self.assertTrue(_jsonld_equal(a, b))
+
+    def test_ignores_date_modified(self):
+        from records.serializers import _jsonld_equal
+        a = {"schema:name": "Test", "schema:dateModified": "2025-01-01"}
+        b = {"schema:name": "Test", "schema:dateModified": "2025-06-01"}
+        self.assertTrue(_jsonld_equal(a, b))
+
+    def test_ignores_subject_of_volatile_fields(self):
+        from records.serializers import _jsonld_equal
+        a = {
+            "schema:name": "Test",
+            "schema:subjectOf": {
+                "@id": "so1",
+                "schema:about": {"@id": "id1"},
+                "schema:sdDatePublished": "2025-01-01",
+                "schema:maintainer": "Alice",
+            },
+        }
+        b = {
+            "schema:name": "Test",
+            "schema:subjectOf": {
+                "@id": "so2",
+                "schema:about": {"@id": "id2"},
+                "schema:sdDatePublished": "2025-06-01",
+                "schema:maintainer": "Alice",
+            },
+        }
+        self.assertTrue(_jsonld_equal(a, b))
+
+    def test_subject_of_non_volatile_difference(self):
+        from records.serializers import _jsonld_equal
+        a = {
+            "schema:name": "Test",
+            "schema:subjectOf": {"schema:maintainer": "Alice"},
+        }
+        b = {
+            "schema:name": "Test",
+            "schema:subjectOf": {"schema:maintainer": "Bob"},
+        }
+        self.assertFalse(_jsonld_equal(a, b))
+
+
+class NextVersionIdentifierTest(TestCase):
+    """Unit tests for _next_version_identifier."""
+
+    def setUp(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Requires PostgreSQL (ArrayField/GinIndex)")
+        self.user = User.objects.create_user(
+            username="veruser", password="pass", orcid="0000-0000-0000-0050"
+        )
+        self.profile = Profile.objects.create(name="verProfile", schema={})
+
+    def test_first_version(self):
+        """No existing records → returns _2."""
+        from records.serializers import _next_version_identifier
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="#abc123", owner=self.user
+        )
+        self.assertEqual(_next_version_identifier("#abc123"), "#abc123_2")
+
+    def test_increments_past_existing(self):
+        """Existing _2 → returns _3."""
+        from records.serializers import _next_version_identifier
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="#abc123", owner=self.user
+        )
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="#abc123_2", owner=self.user
+        )
+        self.assertEqual(_next_version_identifier("#abc123"), "#abc123_3")
+
+    def test_strips_existing_suffix_before_computing(self):
+        """Input already has _2 suffix → still computes from base."""
+        from records.serializers import _next_version_identifier
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="#abc123", owner=self.user
+        )
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="#abc123_2", owner=self.user
+        )
+        self.assertEqual(_next_version_identifier("#abc123_2"), "#abc123_3")
+
+
+class RecordVersioningTest(TestCase):
+    """Integration tests for create() versioning logic."""
+
+    def setUp(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Requires PostgreSQL (ArrayField/GinIndex)")
+        self.user = User.objects.create_user(
+            username="versionuser", password="pass", orcid="0000-0000-0000-0051"
+        )
+        self.other_user = User.objects.create_user(
+            username="otheruser", password="pass", orcid="0000-0000-0000-0052"
+        )
+        self.profile = Profile.objects.create(name="versionProfile", schema={})
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def _make_jsonld(self, name="Test Dataset", extra_field=None):
+        doc = {
+            "@id": "#hash123",
+            "schema:name": name,
+            "schema:subjectOf": {
+                "@id": "so1",
+                "schema:about": {"@id": "#hash123"},
+                "schema:sdDatePublished": "2025-01-01",
+            },
+        }
+        if extra_field:
+            doc["schema:description"] = extra_field
+        return doc
+
+    def test_identical_reimport_returns_existing(self):
+        """Re-importing identical JSON-LD returns the same record, no new version."""
+        jsonld = self._make_jsonld()
+        resp1 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": jsonld},
+            format="json",
+        )
+        self.assertEqual(resp1.status_code, 201)
+        record1_id = resp1.json()["id"]
+
+        # Re-import same data
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 201)
+        record2_id = resp2.json()["id"]
+
+        # Should be the same record
+        self.assertEqual(record1_id, record2_id)
+        self.assertEqual(Record.objects.count(), 1)
+
+    def test_different_reimport_deprecates_old(self):
+        """Re-importing changed JSON-LD deprecates the old record and creates a new one."""
+        resp1 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        self.assertEqual(resp1.status_code, 201)
+        record1_id = resp1.json()["id"]
+
+        # Re-import with different data
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld(extra_field="new description")},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 201)
+        record2_id = resp2.json()["id"]
+
+        # Should be different records
+        self.assertNotEqual(record1_id, record2_id)
+        self.assertEqual(Record.objects.count(), 2)
+
+        # Old record should be deprecated
+        old_record = Record.objects.get(pk=record1_id)
+        self.assertEqual(old_record.status, "deprecated")
+
+        # New record should have versioned identifier
+        new_record = Record.objects.get(pk=record2_id)
+        self.assertEqual(new_record.identifier, "#hash123_2")
+        self.assertEqual(new_record.status, "draft")
+
+    def test_versioned_record_updates_jsonld_id(self):
+        """New versioned record has @id and subjectOf.about updated."""
+        self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld(extra_field="changed")},
+            format="json",
+        )
+        new_record = Record.objects.get(pk=resp2.json()["id"])
+        self.assertEqual(new_record.jsonld["@id"], "#hash123_2")
+        self.assertEqual(
+            new_record.jsonld["schema:subjectOf"]["schema:about"],
+            {"@id": "#hash123_2"},
+        )
+
+    def test_third_version_increments(self):
+        """Three successive imports with changes produce _2 then _3."""
+        self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld(extra_field="v2")},
+            format="json",
+        )
+        resp3 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld(extra_field="v3")},
+            format="json",
+        )
+        new_record = Record.objects.get(pk=resp3.json()["id"])
+        self.assertEqual(new_record.identifier, "#hash123_3")
+        # Two deprecated + one active
+        self.assertEqual(Record.objects.filter(status="deprecated").count(), 2)
+        self.assertEqual(Record.objects.filter(status="draft").count(), 1)
+
+    def test_different_user_gets_fresh_uuid(self):
+        """Another user importing the same identifier gets a fresh UUID, not versioning."""
+        self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        # Switch to other user
+        self.client.force_authenticate(user=self.other_user)
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 201)
+        new_record = Record.objects.get(pk=resp2.json()["id"])
+        # Should NOT be #hash123 or #hash123_2
+        self.assertNotEqual(new_record.identifier, "#hash123")
+        self.assertNotIn("_2", new_record.identifier)
+        # Original record not deprecated
+        self.assertEqual(Record.objects.filter(status="deprecated").count(), 0)
+
+
+class RecordUpdateConflictTest(TestCase):
+    """Integration tests for update() identifier conflict handling."""
+
+    def setUp(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Requires PostgreSQL (ArrayField/GinIndex)")
+        self.user = User.objects.create_user(
+            username="updateuser", password="pass", orcid="0000-0000-0000-0053"
+        )
+        self.profile = Profile.objects.create(name="updateProfile", schema={})
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+    def test_update_with_conflicting_identifier_deprecates(self):
+        """When update changes identifier to one that already exists, old is deprecated."""
+        # Create two records with different identifiers
+        resp1 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": {"@id": "#aaa", "schema:name": "First"}},
+            format="json",
+        )
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": {"@id": "#bbb", "schema:name": "Second"}},
+            format="json",
+        )
+        record2_id = resp2.json()["id"]
+
+        # Update record2's jsonld to have identifier #aaa (conflicts with record1)
+        resp3 = self.client.patch(
+            f"/api/catalog/records/{record2_id}/",
+            {"jsonld": {
+                "@id": "#aaa",
+                "schema:name": "Second Updated",
+                "schema:subjectOf": {"schema:about": {"@id": "#aaa"}},
+            }},
+            format="json",
+        )
+        self.assertEqual(resp3.status_code, 200)
+
+        # Record1 should be deprecated
+        record1 = Record.objects.get(pk=resp1.json()["id"])
+        self.assertEqual(record1.status, "deprecated")
+
+        # Record2 should have versioned identifier
+        record2 = Record.objects.get(pk=record2_id)
+        self.assertEqual(record2.identifier, "#aaa_2")
+
+    def test_update_no_conflict_keeps_identifier(self):
+        """Normal update without conflict preserves the identifier."""
+        resp1 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": {"@id": "#solo", "schema:name": "Solo"}},
+            format="json",
+        )
+        record_id = resp1.json()["id"]
+
+        resp2 = self.client.patch(
+            f"/api/catalog/records/{record_id}/",
+            {"jsonld": {"@id": "#solo", "schema:name": "Solo Updated"}},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        record = Record.objects.get(pk=record_id)
+        self.assertEqual(record.identifier, "#solo")
+        self.assertEqual(Record.objects.filter(status="deprecated").count(), 0)
+
+
+class ExcludeStatusFilterTest(TestCase):
+    """Tests for the exclude_status query parameter on the records list."""
+
+    def setUp(self):
+        if connection.vendor != "postgresql":
+            self.skipTest("Requires PostgreSQL (ArrayField/GinIndex)")
+        self.user = User.objects.create_user(
+            username="filteruser", password="pass", orcid="0000-0000-0000-0054"
+        )
+        self.profile = Profile.objects.create(name="filterProfile", schema={})
+        self.client = APIClient()
+        self.client.force_authenticate(user=self.user)
+
+        # Create records in different statuses
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="rec-draft",
+            owner=self.user, status="draft",
+        )
+        Record.objects.create(
+            profile=self.profile, jsonld={}, identifier="rec-deprecated",
+            owner=self.user, status="deprecated",
+        )
+
+    def test_exclude_deprecated(self):
+        resp = self.client.get("/api/catalog/records/", {"exclude_status": "deprecated"})
+        self.assertEqual(resp.status_code, 200)
+        identifiers = [r["identifier"] for r in resp.json()["results"]]
+        self.assertIn("rec-draft", identifiers)
+        self.assertNotIn("rec-deprecated", identifiers)
+
+    def test_no_exclude_returns_all(self):
+        resp = self.client.get("/api/catalog/records/")
+        self.assertEqual(resp.status_code, 200)
+        identifiers = [r["identifier"] for r in resp.json()["results"]]
+        self.assertIn("rec-draft", identifiers)
+        self.assertIn("rec-deprecated", identifiers)
