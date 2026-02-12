@@ -95,7 +95,7 @@ class ProfileViewSet(viewsets.ModelViewSet):
 class RecordViewSet(viewsets.ModelViewSet):
     """CRUD for JSON-LD metadata records."""
 
-    queryset = Record.objects.select_related("profile", "owner").all()
+    queryset = Record.objects.select_related("profile", "owner").prefetch_related("ada_link").all()
     search_fields = ["title", "identifier", "creators"]
     ordering_fields = ["title", "created_at", "updated_at", "status"]
     filterset_fields = ["profile", "status"]

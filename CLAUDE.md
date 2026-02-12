@@ -103,4 +103,18 @@ CzForm's `showUnfocusedDescription: false` config controls hint visibility per-c
 
 ## Draft Record Validation
 
-Draft records (`status: 'draft'`) skip JSON Schema validation in `RecordSerializer.validate()`. This allows importing non-conforming metadata (e.g., old ADA format) for editing in the form. The serializer also handles identifier conflicts via upsert (same owner updates existing record; different owner mints fresh UUID).
+Draft records (`status: 'draft'`) skip JSON Schema validation in `RecordSerializer.validate()`. This allows importing non-conforming metadata (e.g., old ADA format) for editing in the form. The `create()` serializer handles identifier conflicts via upsert (same owner updates existing record; different owner mints fresh UUID).
+
+## Save vs Submit to ADA (Two-Step Flow)
+
+**"Save Changes"** saves to the local catalog only. `RecordSerializer.update()` extracts `title`/`creators`, stamps `sdDatePublished`, calls `upsert_known_entities()`, but does NOT touch the identifier. This avoids hash-based `@id` conflicts when `populateOnSave()` generates a new hash.
+
+**"Submit to ADA"** saves locally first (PATCH), then calls `POST /api/ada-bridge/push/{record_id}/`. The push flow in `ada_bridge/services.py`:
+1. `_apply_versioning()` runs if `jsonld["@id"] != record.identifier` — deprecates conflicting family records, bumps to `_N+1` suffix
+2. Sets `record.status = "published"`
+3. Translates JSON-LD → ADA payload, computes checksum, creates/updates in ADA
+4. Saves `AdaRecordLink` with `ada_status`, `ada_doi`
+
+The record list API (`RecordListSerializer`) exposes `ada_status` and `ada_doi` fields from `AdaRecordLink`. The frontend shows ADA status/DOI in the profile form (alert banner) and submissions list (chips + "Push to ADA" button).
+
+Re-import versioning in `create()` (for DOI lookups) is unchanged.

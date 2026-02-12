@@ -27,14 +27,15 @@ User → ORCID Login → Select Repository → Fill Schema-Driven Form → Submi
                                           Discovery API → Search Results
 
 Catalog flow:
-User → ORCID Login → Select Profile → Fill Catalog-Driven Form → Save
-                                         ↑                          ↓
-               GET /api/catalog/profiles/{name}/       POST /api/catalog/records/
-                  (schema + uischema + defaults)           (validates, extracts fields)
-                                                                 ↓
-My Submissions → Catalog Records tab → GET /api/catalog/records/?mine=true
+User → ORCID Login → Select Profile → Fill Catalog-Driven Form → Save / Submit to ADA
+                                         ↑                          ↓              ↓
+               GET /api/catalog/profiles/{name}/       PATCH /records/{id}/  POST /ada-bridge/push/{id}/
+                  (schema + uischema + defaults)         (local save)          (version + translate + push)
+                                                                 ↓                      ↓
+My Submissions → Catalog Records tab → GET /api/catalog/records/?mine=true    AdaRecordLink (status, DOI)
                                          ↓
                               Edit → ?record={id} query param → PATCH
+                              Push to ADA → POST /api/ada-bridge/push/{id}/
 ```
 
 ### 1. Authentication (Two Levels)
@@ -158,14 +159,14 @@ This is the most common extension task. Follow these steps in order:
 | `components/submissions/types.ts` | `EnumRepositoryKeys`, `IRepository`, `ISubmission` interfaces |
 | `components/submit/constants.ts` | `repoMetadata`: names, logos, file limits, feature flags per repo |
 | `components/metadata/geodat.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) — fetches profiles from catalog API |
-| `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API, flattens distribution schema, unwraps encodingFormat arrays |
+| `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API, flattens distribution schema, unwraps encodingFormat arrays, "Save Changes" (local) + "Submit to ADA" (push) buttons, ADA status/DOI display |
 | `components/metadata/geodat.cdif-form.vue` | Catalog-driven CDIF form (`/metadata/cdif`) — fetches schema from catalog API |
 | `components/metadata/UpdateMetadata.vue` | Update Existing Metadata page — load JSON-LD by DOI, file, or URL; create draft record |
 | `components/bundle/BundleWizard.vue` | ADA Bundle Wizard — 5-step wizard for ZIP bundle upload, introspection, metadata, and push |
 | `components/bundle/MetadataFormStep.vue` | Bundle wizard metadata form — pre-populates from product YAML, files, inspections |
 | `components/submit/cz.submit.vue` | Submit Data landing page — repository cards (ADA first) |
-| `components/submissions/geodat.submissions.vue` | My Submissions page with Repository Submissions + Catalog Records tabs |
-| `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`, `populateOnLoad` with _distributionType init from @type, `populateOnSave`, `populateMaintainer`, `fetchUserInfo`) |
+| `components/submissions/geodat.submissions.vue` | My Submissions page with Repository Submissions + Catalog Records tabs; ADA status/DOI chips and "Push to ADA" button for ADA profile records |
+| `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`, `populateOnLoad` with _distributionType init from @type, `populateOnSave`, `populateMaintainer`, `fetchUserInfo`); `CatalogRecord` interface includes `ada_status`/`ada_doi` |
 | `routes.ts` | Vue Router route definitions |
 
 ### Schema Files
@@ -241,7 +242,7 @@ ADA and CDIF metadata forms are driven by OGC Building Block schemas served thro
 
 The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 
-**My Submissions page** (`geodat.submissions.vue`) has two tabs: "Repository Submissions" (existing dspback submissions) and "Catalog Records" (fetches from `/api/catalog/records/?mine=true`). Catalog records show title, creators, profile, status, updated date, with Edit/View JSON-LD/Delete actions.
+**My Submissions page** (`geodat.submissions.vue`) has two tabs: "Repository Submissions" (existing dspback submissions) and "Catalog Records" (fetches from `/api/catalog/records/?mine=true`). Catalog records show title, creators, profile, status, ADA status/DOI (when pushed), updated date, with Edit/Push to ADA/View JSON-LD/Delete actions. The "Push to ADA" button appears for ADA profile records and calls `POST /api/ada-bridge/push/{id}/`.
 
 **Important:** CzForm's `renderers` is an internal class field (not a prop), so custom JSON Forms renderers cannot be injected. The Categorization tab handling is done at the parent component level instead.
 
@@ -324,7 +325,7 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/accounts/views.py` | ORCID OAuth login/callback/logout, JWT issuance |
 | `dspback-django/accounts/adapters.py` | allauth adapter populating orcid from social login UID |
 | `dspback-django/records/models.py` | Profile (schema/uischema/defaults/base_profile), Record (UUID PK, JSON-LD, GIN index), KnownPerson, KnownOrganization |
-| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction + entity upsert hooks; ProfileSerializer injects uischema and schema defaults at serve time; RecordSerializer.validate() strips UI-only fields (_showAdvanced, _distributionType) and sets distribution @type |
+| `dspback-django/records/serializers.py` | DRF serializers with validation + field extraction + entity upsert hooks; ProfileSerializer injects uischema and schema defaults at serve time; RecordSerializer.validate() strips UI-only fields (_showAdvanced, _distributionType) and sets distribution @type; RecordListSerializer exposes `ada_status`/`ada_doi` from AdaRecordLink |
 | `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
@@ -350,10 +351,26 @@ All under `/api/catalog/`:
 1. `POST /api/catalog/records/` with `{profile: <id>, jsonld: {...}, status: "draft"}`
 2. Serializer validates JSON-LD against the profile's JSON Schema (skipped for draft records)
 3. `extract_indexed_fields()` pulls title (from `schema:name`), creators (from `schema:creator.@list[].schema:name`), identifier (from `@id` or `schema:identifier`)
-4. Identifier conflict handling: if identifier exists for same owner → upsert (update); if owned by another user → mint fresh UUID
+4. Identifier conflict handling on **create**: if identifier exists for same owner → upsert (update); if owned by another user → mint fresh UUID
 5. `upsert_known_entities()` extracts persons/orgs from JSON-LD and upserts into KnownPerson/KnownOrganization tables (same on create, update, import-url, import-file)
 6. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
 7. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
+
+### Save vs Submit to ADA
+
+**Save Changes** (`PATCH /api/catalog/records/{id}/`):
+- `update()` extracts title/creators, stamps `sdDatePublished`, calls `upsert_known_entities()`
+- Does NOT modify `identifier` — avoids hash-based `@id` conflicts from `populateOnSave()`
+- Record stays in its current status (typically `draft`)
+
+**Submit to ADA** (`POST /api/ada-bridge/push/{record_id}/`):
+- `_apply_versioning()` checks if `jsonld["@id"] != record.identifier` — if so, deprecates conflicting family records, bumps identifier to `_N+1` suffix
+- Sets `record.status = "published"`
+- Translates JSON-LD → ADA payload via `jsonld_to_ada()`, computes checksum
+- Creates (POST) or updates (PATCH) record in ADA via `AdaClient`
+- Saves `AdaRecordLink` with `ada_record_id`, `ada_doi`, `ada_status`, `push_checksum`
+
+The record list API (`RecordListSerializer`) exposes `ada_status` and `ada_doi` from `AdaRecordLink` for display in the submissions list.
 
 ### Person/Org Pick Lists (Autocomplete)
 
@@ -445,7 +462,7 @@ IEDA Catalog Record (JSON-LD)
 | `ada_bridge/models.py` | `AdaRecordLink` — OneToOne link to `records.Record`, stores `ada_record_id`, `ada_doi`, `ada_status`, `push_checksum` |
 | `ada_bridge/translator_ada.py` | Translates JSON-LD (namespace-prefixed) to ADA API camelCase. `jsonld_to_ada()`, `ada_to_jsonld_status()`, `compute_payload_checksum()` |
 | `ada_bridge/client.py` | `AdaClient` — HTTP wrapper for ADA API with `Api-Key` auth. CRUD + bundle upload via DOI-based paths |
-| `ada_bridge/services.py` | `push_record_to_ada()`, `sync_ada_status()`, `upload_bundle_and_introspect()` |
+| `ada_bridge/services.py` | `_apply_versioning()` (identifier conflict resolution on push), `push_record_to_ada()` (versioning + status + translate + push), `sync_ada_status()`, `upload_bundle_and_introspect()` |
 | `ada_bridge/bundle_service.py` | ZIP introspection using `ada_metadata_forms` inspectors (CSV, image, HDF5) |
 | `ada_bridge/views.py` | DRF function-based views for push, sync, status, bundle endpoints |
 | `ada_bridge/urls.py` | URL routes under `/api/ada-bridge/` |
@@ -467,11 +484,14 @@ All under `/api/ada-bridge/`, all require authentication:
 ### Push Flow
 
 1. `POST /api/ada-bridge/push/{record_id}/`
-2. Fetch IEDA Record → `translator_ada.jsonld_to_ada(record.jsonld, profile_name)`
-3. Compute SHA-256 checksum → skip if matches `AdaRecordLink.push_checksum`
-4. No existing link → `AdaClient.create_record(payload)` (POST to ADA)
-5. Has existing link → `AdaClient.update_record(doi, payload)` (PATCH to ADA)
-6. Save `AdaRecordLink` with `ada_record_id`, `ada_doi`, `ada_status`, checksum
+2. Fetch IEDA Record
+3. **Versioning:** If `jsonld["@id"] != record.identifier`, call `_apply_versioning()` — finds identifier family (`base(_\d+)?`), deprecates active versions, bumps to `_N+1` suffix, updates `record.identifier` and `jsonld["@id"]`
+4. Set `record.status = "published"` if not already
+5. Translate → `translator_ada.jsonld_to_ada(record.jsonld, profile_name)`
+6. Compute SHA-256 checksum → skip if matches `AdaRecordLink.push_checksum`
+7. No existing link → `AdaClient.create_record(payload)` (POST to ADA)
+8. Has existing link → `AdaClient.update_record(doi, payload)` (PATCH to ADA)
+9. Save `AdaRecordLink` with `ada_record_id`, `ada_doi`, `ada_status`, checksum
 
 ### Field Mapping (translator_ada.py)
 

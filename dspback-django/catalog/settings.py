@@ -87,8 +87,22 @@ DATABASES = {
         "PASSWORD": os.environ.get("POSTGRES_PASSWORD", "dsp"),
         "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-    }
+    },
 }
+
+# ADA database (read-only, for DOI lookup against the local ADA PostgreSQL)
+_ada_db_name = os.environ.get("ADA_DB_NAME", "")
+if _ada_db_name:
+    DATABASES["ada"] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": _ada_db_name,
+        "USER": os.environ.get("ADA_DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("ADA_DB_PASSWORD", ""),
+        "HOST": os.environ.get("ADA_DB_HOST", "localhost"),
+        "PORT": os.environ.get("ADA_DB_PORT", "5432"),
+    }
+
+DATABASE_ROUTERS = ["ada_bridge.db_router.AdaDatabaseRouter"]
 
 # --- Auth ---
 

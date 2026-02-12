@@ -451,20 +451,8 @@ class RecordSerializer(serializers.ModelSerializer):
             fields = extract_indexed_fields(jsonld)
             validated_data["title"] = fields["title"]
             validated_data["creators"] = fields["creators"]
-            if fields["identifier"]:
-                new_id = fields["identifier"]
-                # Check conflict with a DIFFERENT record
-                conflict = (Record.objects.filter(identifier=new_id)
-                            .exclude(id=instance.id).first())
-                if conflict and conflict.owner_id == instance.owner_id:
-                    conflict.status = "deprecated"
-                    conflict.save(update_fields=["status"])
-                    new_id = _next_version_identifier(new_id)
-                    # Update @id and subjectOf in jsonld
-                    jsonld["@id"] = new_id
-                    if jsonld.get("schema:subjectOf"):
-                        jsonld["schema:subjectOf"]["schema:about"] = {"@id": new_id}
-                validated_data["identifier"] = new_id
+            # Do NOT update identifier on regular save.
+            # Identifier changes only happen via the ADA push flow.
             _stamp_sd_date_published(jsonld)
             upsert_known_entities(jsonld)
 
@@ -476,6 +464,8 @@ class RecordListSerializer(serializers.ModelSerializer):
 
     profile_name = serializers.CharField(source="profile.name", read_only=True)
     owner_orcid = serializers.CharField(source="owner.orcid", read_only=True, default=None)
+    ada_status = serializers.SerializerMethodField()
+    ada_doi = serializers.SerializerMethodField()
 
     class Meta:
         model = Record
@@ -488,9 +478,25 @@ class RecordListSerializer(serializers.ModelSerializer):
             "identifier",
             "status",
             "owner_orcid",
+            "ada_status",
+            "ada_doi",
             "created_at",
             "updated_at",
         ]
+
+    def get_ada_status(self, obj):
+        try:
+            link = obj.ada_link
+        except Exception:
+            return None
+        return link.ada_status or None
+
+    def get_ada_doi(self, obj):
+        try:
+            link = obj.ada_link
+        except Exception:
+            return None
+        return link.ada_doi or None
 
 
 class ImportURLSerializer(serializers.Serializer):

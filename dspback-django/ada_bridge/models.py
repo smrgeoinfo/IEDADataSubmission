@@ -96,3 +96,47 @@ class BundleSession(models.Model):
 
     def __str__(self):
         return f"BundleSession {self.session_id} ({self.status})"
+
+
+# ---------------------------------------------------------------------------
+# Unmanaged models for direct read-only access to the ADA PostgreSQL database.
+# These map to existing tables in the 'ada' database (ada1).
+# Routed via AdaDatabaseRouter.
+# ---------------------------------------------------------------------------
+
+
+class AdaJsonTable(models.Model):
+    """Pre-generated JSON-LD metadata indexed by DOI in the ADA database."""
+
+    doi = models.CharField(max_length=60, primary_key=True)
+    jsonobject = models.JSONField()
+    update_date = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = "json_table"
+
+    def __str__(self):
+        return self.doi
+
+
+class AdaRecord(models.Model):
+    """Main records table in the ADA database (read-only)."""
+
+    id = models.BigAutoField(primary_key=True)
+    created_at = models.DateTimeField()
+    updated_at = models.DateTimeField()
+    title = models.CharField(max_length=1000)
+    description = models.TextField(blank=True, null=True)
+    submission_type = models.CharField(max_length=100)
+    general_type = models.CharField(max_length=100)
+    specific_type = models.CharField(max_length=100, blank=True, null=True)
+    doi = models.CharField(max_length=100, blank=True, null=True)
+    process_status = models.CharField(max_length=50)
+
+    class Meta:
+        managed = False
+        db_table = "records"
+
+    def __str__(self):
+        return f"{self.doi or self.id}: {self.title}"

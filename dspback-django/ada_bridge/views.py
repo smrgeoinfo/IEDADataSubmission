@@ -23,8 +23,10 @@ from rest_framework.decorators import api_view, parser_classes, permission_class
 from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 
+from django.conf import settings
+
 from ada_bridge.client import AdaClient, AdaClientError
-from ada_bridge.models import AdaRecordLink, BundleSession
+from ada_bridge.models import AdaJsonTable, AdaRecordLink, BundleSession
 from ada_bridge.serializers import (
     AdaRecordLinkSerializer,
     BundleSessionSerializer,
@@ -322,6 +324,10 @@ def doi_lookup_view(request):
     """
     Look up an ADA record by DOI and return its JSON-LD representation.
 
+    Tries the local ADA PostgreSQL database first (json_table), then
+    falls back to the ADA REST API if not found or if the database
+    is not configured.
+
     Query params:
         doi — the DOI to look up
     """
@@ -332,13 +338,37 @@ def doi_lookup_view(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # --- Try local ADA database first ---
+    if "ada" in settings.DATABASES:
+        try:
+            row = AdaJsonTable.objects.using("ada").get(doi=doi)
+            jsonld = row.jsonobject
+            return Response(
+                {"jsonld": jsonld, "source": "ada_database"},
+                status=status.HTTP_200_OK,
+            )
+        except AdaJsonTable.DoesNotExist:
+            logger.info("DOI %s not found in local ADA json_table, trying API.", doi)
+        except Exception as exc:
+            logger.warning("ADA database query failed for %s: %s", doi, exc)
+
+    # --- Fall back to ADA REST API ---
     try:
         client = AdaClient()
         ada_record = client.get_record(doi)
         jsonld = ada_to_jsonld(ada_record)
-        return Response({"jsonld": jsonld, "ada_record": ada_record}, status=status.HTTP_200_OK)
+        return Response(
+            {"jsonld": jsonld, "ada_record": ada_record, "source": "ada_api"},
+            status=status.HTTP_200_OK,
+        )
     except AdaClientError as exc:
         return Response(
             {"detail": "ADA API error.", "ada_error": exc.detail},
             status=status.HTTP_502_BAD_GATEWAY,
+        )
+    except Exception as exc:
+        logger.exception("DOI lookup failed for %s", doi)
+        return Response(
+            {"detail": f"Record not found. Could not reach ADA API: {exc}"},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
