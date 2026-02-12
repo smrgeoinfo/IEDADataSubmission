@@ -2,6 +2,7 @@ import copy
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 
 from rest_framework import serializers
 
@@ -197,6 +198,13 @@ def _next_version_identifier(base_identifier: str) -> str:
         if m:
             max_ver = max(max_ver, int(m.group(1)))
     return f"{base}_{max_ver + 1}"
+
+
+def _stamp_sd_date_published(jsonld):
+    """Set schema:subjectOf.schema:sdDatePublished to the current UTC time."""
+    so = jsonld.get("schema:subjectOf")
+    if isinstance(so, dict):
+        so["schema:sdDatePublished"] = datetime.now(timezone.utc).isoformat()
 
 
 class ProfileSerializer(serializers.ModelSerializer):
@@ -434,6 +442,7 @@ class RecordSerializer(serializers.ModelSerializer):
                 # Identifier taken by another user — assign a new one
                 validated_data["identifier"] = str(uuid.uuid4())
 
+        _stamp_sd_date_published(jsonld)
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -456,6 +465,7 @@ class RecordSerializer(serializers.ModelSerializer):
                     if jsonld.get("schema:subjectOf"):
                         jsonld["schema:subjectOf"]["schema:about"] = {"@id": new_id}
                 validated_data["identifier"] = new_id
+            _stamp_sd_date_published(jsonld)
             upsert_known_entities(jsonld)
 
         return super().update(instance, validated_data)

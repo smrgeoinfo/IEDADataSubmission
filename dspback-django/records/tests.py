@@ -1775,6 +1775,37 @@ class RecordVersioningTest(TestCase):
         # Original record not deprecated
         self.assertEqual(Record.objects.filter(status="deprecated").count(), 0)
 
+    def test_create_stamps_sd_date_published(self):
+        """New record gets schema:sdDatePublished set to current time."""
+        jsonld = self._make_jsonld()
+        resp = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": jsonld},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        record = Record.objects.get(pk=resp.json()["id"])
+        sd = record.jsonld.get("schema:subjectOf", {})
+        self.assertIn("schema:sdDatePublished", sd)
+        # Should be a valid ISO timestamp
+        self.assertIn("T", sd["schema:sdDatePublished"])
+
+    def test_versioned_record_stamps_sd_date_published(self):
+        """Versioned record gets a fresh sdDatePublished."""
+        self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld()},
+            format="json",
+        )
+        resp2 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": self._make_jsonld(extra_field="v2")},
+            format="json",
+        )
+        new_record = Record.objects.get(pk=resp2.json()["id"])
+        sd = new_record.jsonld.get("schema:subjectOf", {})
+        self.assertIn("schema:sdDatePublished", sd)
+
 
 class RecordUpdateConflictTest(TestCase):
     """Integration tests for update() identifier conflict handling."""
@@ -1842,6 +1873,34 @@ class RecordUpdateConflictTest(TestCase):
         record = Record.objects.get(pk=record_id)
         self.assertEqual(record.identifier, "#solo")
         self.assertEqual(Record.objects.filter(status="deprecated").count(), 0)
+
+    def test_update_stamps_sd_date_published(self):
+        """Updating a record sets sdDatePublished to current time."""
+        resp1 = self.client.post(
+            "/api/catalog/records/",
+            {"profile": self.profile.pk, "jsonld": {
+                "@id": "#ts",
+                "schema:name": "Timestamp Test",
+                "schema:subjectOf": {"schema:about": {"@id": "#ts"}},
+            }},
+            format="json",
+        )
+        record_id = resp1.json()["id"]
+
+        resp2 = self.client.patch(
+            f"/api/catalog/records/{record_id}/",
+            {"jsonld": {
+                "@id": "#ts",
+                "schema:name": "Timestamp Updated",
+                "schema:subjectOf": {"schema:about": {"@id": "#ts"}},
+            }},
+            format="json",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        record = Record.objects.get(pk=record_id)
+        sd = record.jsonld.get("schema:subjectOf", {})
+        self.assertIn("schema:sdDatePublished", sd)
+        self.assertIn("T", sd["schema:sdDatePublished"])
 
 
 class ExcludeStatusFilterTest(TestCase):
