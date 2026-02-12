@@ -158,8 +158,12 @@ This is the most common extension task. Follow these steps in order:
 | `components/submissions/types.ts` | `EnumRepositoryKeys`, `IRepository`, `ISubmission` interfaces |
 | `components/submit/constants.ts` | `repoMetadata`: names, logos, file limits, feature flags per repo |
 | `components/metadata/geodat.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) — fetches profiles from catalog API |
-| `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API |
+| `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API, flattens distribution schema, unwraps encodingFormat arrays |
 | `components/metadata/geodat.cdif-form.vue` | Catalog-driven CDIF form (`/metadata/cdif`) — fetches schema from catalog API |
+| `components/metadata/UpdateMetadata.vue` | Update Existing Metadata page — load JSON-LD by DOI, file, or URL; create draft record |
+| `components/bundle/BundleWizard.vue` | ADA Bundle Wizard — 5-step wizard for ZIP bundle upload, introspection, metadata, and push |
+| `components/bundle/MetadataFormStep.vue` | Bundle wizard metadata form — pre-populates from product YAML, files, inspections |
+| `components/submit/cz.submit.vue` | Submit Data landing page — repository cards (ADA first) |
 | `components/submissions/geodat.submissions.vue` | My Submissions page with Repository Submissions + Catalog Records tabs |
 | `services/catalog.ts` | Catalog API helpers (`fetchMyRecords`, `deleteRecord`, `populateOnLoad` with _distributionType init from @type, `populateOnSave`, `populateMaintainer`, `fetchUserInfo`) |
 | `routes.ts` | Vue Router route definitions |
@@ -343,12 +347,13 @@ All under `/api/catalog/`:
 
 ### Record Lifecycle
 
-1. `POST /api/catalog/records/` with `{profile: <id>, jsonld: {...}}`
-2. Serializer validates JSON-LD against the profile's JSON Schema
+1. `POST /api/catalog/records/` with `{profile: <id>, jsonld: {...}, status: "draft"}`
+2. Serializer validates JSON-LD against the profile's JSON Schema (skipped for draft records)
 3. `extract_indexed_fields()` pulls title (from `schema:name`), creators (from `schema:creator.@list[].schema:name`), identifier (from `@id` or `schema:identifier`)
-4. `upsert_known_entities()` extracts persons/orgs from JSON-LD and upserts into KnownPerson/KnownOrganization tables (same on create, update, import-url, import-file)
-5. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
-6. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
+4. Identifier conflict handling: if identifier exists for same owner → upsert (update); if owned by another user → mint fresh UUID
+5. `upsert_known_entities()` extracts persons/orgs from JSON-LD and upserts into KnownPerson/KnownOrganization tables (same on create, update, import-url, import-file)
+6. Record stored with extracted fields for search/filter, full JSON-LD as source of truth
+7. `GET /api/catalog/records/{id}/jsonld/` returns the raw JSON-LD for harvesting
 
 ### Person/Org Pick Lists (Autocomplete)
 
@@ -507,6 +512,54 @@ Run tests: `docker exec catalog python manage.py test ada_bridge`
 Settings in `catalog/settings.py` (from environment):
 - `ADA_API_BASE_URL` — Base URL of the ADA API (e.g., `http://ada-api:8000`)
 - `ADA_API_KEY` — API key created in ADA's Django admin
+
+## Bundle Wizard
+
+The ADA Bundle Wizard (`/bundle-wizard`) lets users upload a ZIP bundle, review files, fill metadata, and push to ADA. It's a 5-step wizard:
+
+1. **Upload** — Upload ZIP, backend introspects file contents (CSV columns, Excel sheets, HDF5 variables, image dimensions, PDF text)
+2. **Product Info** — If no `product.yaml` found, user selects one from YAML files in bundle or enters manually
+3. **File Review** — Table of all files with MIME types, sizes, inspection summaries, component types. Common filename prefix detection. Auto-assigns component types from product YAML
+4. **Metadata Form** — CzForm driven by selected profile. Pre-populates from product YAML, bundle files, and file inspections (variables from CSV columns, samples from IGSN/DOI/ARK/OREX identifiers, distribution with hasPart file list)
+5. **Review & Submit** — Final review and push to ADA
+
+### Key Components
+
+| File | Purpose |
+|------|---------|
+| `dspfront/src/components/bundle/BundleWizard.vue` | Wizard container, step navigation, YAML picker dialog |
+| `dspfront/src/components/bundle/BundleUploadStep.vue` | ZIP upload with drag-and-drop |
+| `dspfront/src/components/bundle/ProductFormStep.vue` | Manual product info entry |
+| `dspfront/src/components/bundle/FileReviewStep.vue` | File table with MIME/component type editing |
+| `dspfront/src/components/bundle/MetadataFormStep.vue` | Profile-driven metadata form with pre-population |
+| `dspfront/src/components/bundle/BundleReviewStep.vue` | Final review and submit |
+| `dspback-django/ada_bridge/inspectors.py` | File inspectors (CSV, Excel, HDF5, NetCDF, PDF, text) |
+
+### Distribution Schema Flattening
+
+The `schema:distribution` is canonically an array in JSON-LD, but the uischema treats it as a single object (one archive with hasPart file list). Both `MetadataFormStep.vue` and `geodat.ada-profile-form.vue` flatten at load time:
+- **Schema**: Convert `distribution` from `{type: "array", items: {...}}` to the items object
+- **Data**: Unwrap `distribution[0]` to object; unwrap `encodingFormat` arrays to strings
+- **Save**: Wrap back to array; serializer wraps `encodingFormat` strings back to arrays
+
+### Physical Structure Toggle
+
+The "Describe Physical Structure" checkbox in hasPart items is only shown for tabular/spreadsheet/datacube MIME types. Uses OR+const rule conditions (not `enum`, which CzForm doesn't reliably support). The schema injection (`uischema_injection.py`) converts `encodingFormat` from array to string so rule conditions work.
+
+### Form UX
+
+- **Hover-to-show hints**: `showUnfocusedDescription: false` + `persistent-hint: false` in formConfig. CSS hides `.v-input__details` by default, shows on hover/focus-within. Rules target both `.metadata-form-step` and `.v-overlay__content` for portal-rendered content.
+- **Compact spacing**: 2px margin between fields, 4px group margins
+- **Description textareas**: `rows: 2, autoGrow: true` for compact initial height
+
+## Update Existing Metadata
+
+The Update Metadata page (`/metadata/update`) allows loading existing JSON-LD for editing:
+- **By DOI** — Fetches from ADA bridge lookup API
+- **From file** — Upload a local JSON-LD file
+- **From URL** — Fetch from any URL
+
+Creates a draft catalog record (skips validation) and navigates to the profile form. The profile form applies distribution schema flattening and encodingFormat unwrapping when loading record data.
 
 ## Deployment
 

@@ -459,7 +459,7 @@ VARIABLE_DETAIL = {
             "type": "Control",
             "scope": "#/properties/schema:description",
             "label": "Description",
-            "options": {"multi": True},
+            "options": {"multi": True, "rows": 2, "autoGrow": True},
         },
         {
             "type": "Control",

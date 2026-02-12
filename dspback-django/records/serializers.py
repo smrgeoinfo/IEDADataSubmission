@@ -328,7 +328,10 @@ class RecordSerializer(serializers.ModelSerializer):
                             if isinstance(part_fd, dict):
                                 _clean_physical_mapping_items(part_fd)
 
-        if jsonld and profile.schema:
+        # Skip schema validation for draft records (imported data may not
+        # conform yet — the user will fix it in the form).
+        record_status = attrs.get("status", getattr(self.instance, "status", None))
+        if record_status != "draft" and jsonld and profile.schema:
             validation_schema = _relax_type_constraints(profile.schema)
             errors = validate_record(jsonld, validation_schema)
             if errors:
@@ -339,13 +342,30 @@ class RecordSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         jsonld = validated_data.get("jsonld", {})
         fields = extract_indexed_fields(jsonld)
+        user = self.context["request"].user
 
         validated_data["title"] = fields["title"]
         validated_data["creators"] = fields["creators"]
         validated_data["identifier"] = fields["identifier"] or str(uuid.uuid4())
-        validated_data["owner"] = self.context["request"].user
+        validated_data["owner"] = user
 
         upsert_known_entities(jsonld)
+
+        # Upsert: if a record with this identifier already exists for this
+        # user, update it instead of raising a duplicate-key error.
+        # If it belongs to a different user, mint a fresh identifier.
+        identifier = validated_data["identifier"]
+        existing = Record.objects.filter(identifier=identifier).first()
+        if existing:
+            if existing.owner_id == user.id:
+                for key, value in validated_data.items():
+                    setattr(existing, key, value)
+                existing.save()
+                return existing
+            else:
+                # Identifier taken by another user — assign a new one
+                validated_data["identifier"] = str(uuid.uuid4())
+
         return super().create(validated_data)
 
     def update(self, instance, validated_data):

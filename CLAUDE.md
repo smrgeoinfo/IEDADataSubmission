@@ -76,3 +76,31 @@ Quick checklist:
 - UISchema scopes must include `schema:` prefix: `#/properties/schema:name` not `#/properties/name`
 - Frontend profile selection auto-discovers CDIF profiles (names starting with `CDIF`, excluding `CDIFDiscovery`)
 - ADA technique profiles need `base_profile` FK set via `PARENT_PROFILES` in `load_profiles.py`
+
+## Distribution Schema Flattening
+
+The `schema:distribution` schema is `type: array` in the canonical JSON-LD but the uischema scopes into it as an object (archive info + hasPart file list as separate groups). Both `MetadataFormStep.vue` (bundle wizard) and `geodat.ada-profile-form.vue` (profile form) flatten the schema at load time:
+
+1. **Schema**: `_flattenDistributionSchema()` converts `distribution` from `{type: "array", items: {...}}` to the items object
+2. **Data load**: Unwrap `distribution` array to single object; unwrap `encodingFormat` arrays to strings
+3. **Data save**: Wrap `distribution` object back to array; serializer wraps `encodingFormat` strings back to arrays
+
+This is required because `uischema_injection.py` also converts `encodingFormat` from array to string (with MIME enum) so that SHOW rule conditions (`{"const": "text/csv"}`) work against simple string values.
+
+## CzForm Rule Conditions
+
+CzForm (cznet-vue-core) does NOT reliably support `enum` in rule conditions. Use OR with individual `{"const": value}` conditions instead:
+```json
+{"type": "OR", "conditions": [
+  {"scope": "#/properties/field", "schema": {"const": "value1"}},
+  {"scope": "#/properties/field", "schema": {"const": "value2"}}
+]}
+```
+
+## Form Hints (Hover-to-Show)
+
+CzForm's `showUnfocusedDescription: false` config controls hint visibility per-control. The Vuetify-level `persistent-hint` in `formConfig.vuetify.commonAttrs` must be `false` to avoid overriding this. CSS hover-to-show rules must target both `.metadata-form-step` and `.v-overlay__content` to reach CzForm content rendered in Vuetify dialog/overlay portals.
+
+## Draft Record Validation
+
+Draft records (`status: 'draft'`) skip JSON Schema validation in `RecordSerializer.validate()`. This allows importing non-conforming metadata (e.g., old ADA format) for editing in the form. The serializer also handles identifier conflicts via upsert (same owner updates existing record; different owner mints fresh UUID).
