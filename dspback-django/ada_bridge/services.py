@@ -279,25 +279,35 @@ def introspect_bundle_session(session: BundleSession) -> BundleSession:
     # Run introspection
     result = introspect_bundle(session.bundle_path)
 
-    # Check for product.yaml in the manifest
+    # Check for product.yaml in the manifest.
+    # Match exact names first, then fall back to product-*.yaml pattern
+    # (e.g. "product-10.60707-j6f9-tp89.yaml" used by ADA bundles).
     product_yaml_found = False
+    product_yaml_path = None
+
     for filepath in result.get("manifest", []):
         basename = os.path.basename(filepath).lower()
         if basename in ("product.yaml", "product.yml"):
-            product_yaml_found = True
-            # Try to parse it
-            try:
-                import zipfile
-                import yaml
-
-                with zipfile.ZipFile(session.bundle_path, "r") as zf:
-                    with zf.open(filepath) as f:
-                        product_data = yaml.safe_load(f)
-                        if isinstance(product_data, dict):
-                            session.product_yaml = product_data
-            except Exception:
-                logger.exception("Failed to parse product.yaml from bundle")
+            product_yaml_path = filepath
             break
+        if not product_yaml_path and basename.startswith("product") and (
+            basename.endswith(".yaml") or basename.endswith(".yml")
+        ):
+            product_yaml_path = filepath
+
+    if product_yaml_path:
+        product_yaml_found = True
+        try:
+            import zipfile
+            import yaml
+
+            with zipfile.ZipFile(session.bundle_path, "r") as zf:
+                with zf.open(product_yaml_path) as f:
+                    product_data = yaml.safe_load(f)
+                    if isinstance(product_data, dict):
+                        session.product_yaml = product_data
+        except Exception:
+            logger.exception("Failed to parse product YAML from bundle")
 
     session.introspection_result = result
     session.status = BundleSession.Status.READY
@@ -308,6 +318,65 @@ def introspect_bundle_session(session: BundleSession) -> BundleSession:
         session.session_id,
         len(result.get("manifest", [])),
         "found" if product_yaml_found else "missing",
+    )
+    return session
+
+
+def select_product_yaml(session: BundleSession, filepath: str) -> BundleSession:
+    """
+    Parse a user-selected file from the bundle ZIP as the product YAML.
+
+    The user picks a file from the introspection manifest (e.g.
+    ``product-10.60707-j6f9-tp89.yaml``) and this function reads it from the
+    ZIP, parses it as YAML, and stores it on the session.
+
+    Parameters
+    ----------
+    session : BundleSession
+        The bundle session whose ZIP to read from.
+    filepath : str
+        Path within the ZIP archive to the selected YAML file.
+
+    Returns
+    -------
+    BundleSession
+        The updated session with ``product_yaml`` populated.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the bundle ZIP or the selected file within it is not found.
+    ValueError
+        If the selected file is not valid YAML or not a mapping.
+    """
+    import zipfile
+
+    import yaml
+
+    if not os.path.isfile(session.bundle_path):
+        raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
+
+    with zipfile.ZipFile(session.bundle_path, "r") as zf:
+        # Verify the file exists in the archive
+        if filepath not in zf.namelist():
+            raise FileNotFoundError(f"File '{filepath}' not found in bundle archive.")
+
+        with zf.open(filepath) as f:
+            try:
+                product_data = yaml.safe_load(f)
+            except yaml.YAMLError as exc:
+                raise ValueError(f"Failed to parse YAML: {exc}")
+
+            if not isinstance(product_data, dict):
+                raise ValueError("Selected file is not a valid YAML mapping.")
+
+            session.product_yaml = product_data
+            session.save(update_fields=["product_yaml", "updated_at"])
+
+    logger.info(
+        "Selected product YAML '%s' for bundle session %s",
+        filepath,
+        session.session_id,
     )
     return session
 

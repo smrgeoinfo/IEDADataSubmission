@@ -8,9 +8,10 @@ Endpoints:
     POST /api/ada-bridge/bundle/introspect/               — upload ZIP, return metadata (legacy)
     POST /api/ada-bridge/bundle/upload/{record_id}/       — upload bundle to linked ADA record (legacy)
     POST /api/ada-bridge/bundle/upload/                   — create BundleSession from upload
-    POST /api/ada-bridge/bundle/{session_id}/introspect/  — run introspection on session
-    GET  /api/ada-bridge/bundle/{session_id}/             — get session state
-    PATCH /api/ada-bridge/bundle/{session_id}/            — update session (product_yaml, jsonld_draft)
+    POST /api/ada-bridge/bundle/{session_id}/introspect/           — run introspection on session
+    POST /api/ada-bridge/bundle/{session_id}/select-product-yaml/ — parse user-selected file as product.yaml
+    GET  /api/ada-bridge/bundle/{session_id}/                     — get session state
+    PATCH /api/ada-bridge/bundle/{session_id}/                    — update session (product_yaml, jsonld_draft)
     POST /api/ada-bridge/bundle/{session_id}/submit/      — save to catalog + push to ADA
     GET  /api/ada-bridge/lookup/                          — look up ADA record by DOI
 """
@@ -37,6 +38,7 @@ from ada_bridge.services import (
     create_bundle_session,
     introspect_bundle_session,
     push_record_to_ada,
+    select_product_yaml,
     submit_bundle_session,
     sync_ada_status,
     upload_bundle_and_introspect,
@@ -271,6 +273,42 @@ def bundle_session_submit_view(request, session_id):
         )
 
     return Response(result, status=status.HTTP_200_OK)
+
+
+@api_view(["POST"])
+@permission_classes([permissions.IsAuthenticated])
+@parser_classes([JSONParser])
+def bundle_session_select_product_view(request, session_id):
+    """Parse a user-selected file from the bundle as product.yaml."""
+    try:
+        session = BundleSession.objects.get(session_id=session_id)
+    except BundleSession.DoesNotExist:
+        return Response(
+            {"detail": "Bundle session not found."},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+
+    filepath = request.data.get("filepath", "").strip()
+    if not filepath:
+        return Response(
+            {"detail": "'filepath' is required."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        session = select_product_yaml(session, filepath)
+    except FileNotFoundError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    except ValueError as exc:
+        return Response(
+            {"detail": str(exc)},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return Response(BundleSessionSerializer(session).data, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ from ada_bridge.views import (
     bundle_introspect_view,
     bundle_session_detail_view,
     bundle_session_introspect_view,
+    bundle_session_select_product_view,
     bundle_session_submit_view,
     bundle_session_upload_view,
     bundle_upload_view,
@@ -28,6 +29,7 @@ urlpatterns = [
     # New session-based bundle endpoints
     path("bundle/upload/", bundle_session_upload_view, name="bundle-session-upload"),
     path("bundle/<uuid:session_id>/introspect/", bundle_session_introspect_view, name="bundle-session-introspect"),
+    path("bundle/<uuid:session_id>/select-product-yaml/", bundle_session_select_product_view, name="bundle-session-select-product"),
     path("bundle/<uuid:session_id>/", bundle_session_detail_view, name="bundle-session-detail"),
     path("bundle/<uuid:session_id>/submit/", bundle_session_submit_view, name="bundle-session-submit"),
 

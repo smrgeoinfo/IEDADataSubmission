@@ -217,38 +217,14 @@ def _pm_ctrl(prop, label):
     }
 
 
-# Advanced field scopes for physicalMapping — used in OR conditions to auto-show
-# the Advanced group when any of these fields already has data.
-_PM_ADVANCED_FIELDS = [
-    ("cdi:format", {"minLength": 1}),
-    ("cdi:physicalDataType", {"minLength": 1}),
-    ("cdi:length", {"type": "number"}),
-    ("cdi:scale", {"type": "number"}),
-    ("cdi:decimalPositions", {"type": "number"}),
-    ("cdi:minimumLength", {"type": "number"}),
-    ("cdi:maximumLength", {"type": "number"}),
-    ("cdi:nullSequence", {"minLength": 1}),
-    ("cdi:defaultValue", {"minLength": 1}),
-    ("cdi:displayLabel", {"minLength": 1}),
-    ("cdi:defaultDecimalSeparator", {"minLength": 1}),
-    ("cdi:defaultDigitalGroupSeparator", {"minLength": 1}),
-]
-
-_PM_ADVANCED_OR_CONDITIONS = [
-    {"scope": "#/properties/_showAdvanced", "schema": {"const": True}},
-] + [
-    {"scope": f"#/properties/{prop}", "schema": schema, "failWhenUndefined": True}
-    for prop, schema in _PM_ADVANCED_FIELDS
-]
-
 _PM_ADVANCED_GROUP = {
     "type": "Group",
     "label": "Advanced",
     "rule": {
         "effect": "SHOW",
         "condition": {
-            "type": "OR",
-            "conditions": _PM_ADVANCED_OR_CONDITIONS,
+            "scope": "#/properties/_showAdvanced",
+            "schema": {"const": True},
         },
     },
     "elements": [
@@ -589,7 +565,7 @@ HAS_PART_DETAIL = {
     "type": "VerticalLayout",
     "elements": [
         {"type": "Control", "scope": "#/properties/schema:name", "label": "File Name"},
-        {"type": "Control", "scope": "#/properties/schema:description", "label": "Description"},
+        {"type": "Control", "scope": "#/properties/schema:description", "label": "Description", "options": {"multi": True, "rows": 2, "autoGrow": True}},
         {
             "type": "Control",
             "scope": "#/properties/schema:encodingFormat",
@@ -710,6 +686,133 @@ HAS_PART_DETAIL = {
         },
     ],
 }
+
+# MIME types eligible for "Describe Physical Structure" toggle
+PHYSICAL_STRUCTURE_MIMES = TABULAR_MIMES + SPREADSHEET_MIMES + DATACUBE_MIMES
+
+# Detail layout for hasPart items in bundle wizard (injected via _walk).
+# Includes a "Describe Physical Structure" toggle that reveals physical
+# mapping controls for tabular/spreadsheet/datacube file types.
+BUNDLE_HAS_PART_DETAIL = {
+    "type": "VerticalLayout",
+    "elements": [
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                {"type": "Control", "scope": "#/properties/schema:name", "label": "File Name"},
+                {"type": "Control", "scope": "#/properties/schema:additionalType", "label": "Component Type"},
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                {"type": "Control", "scope": "#/properties/schema:encodingFormat", "label": "MIME Type"},
+                {"type": "Control", "scope": "#/properties/schema:size/properties/schema:value", "label": "Size (bytes)"},
+            ],
+        },
+        {"type": "Control", "scope": "#/properties/schema:description", "label": "Description", "options": {"multi": True, "rows": 2, "autoGrow": True}},
+        # Toggle — only visible for tabular/spreadsheet/datacube MIME types.
+        # Uses OR with individual const conditions (enum not reliably supported
+        # in CzForm rule conditions).
+        {
+            "type": "Control",
+            "scope": "#/properties/_showPhysicalStructure",
+            "label": "Describe Physical Structure",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "type": "OR",
+                    "conditions": [
+                        {"scope": "#/properties/schema:encodingFormat", "schema": {"const": mime}}
+                        for mime in PHYSICAL_STRUCTURE_MIMES
+                    ],
+                },
+            },
+        },
+        # Tabular physical mapping (CSV/TSV/spreadsheet)
+        {
+            "type": "Group",
+            "label": "Tabular Data Structure",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "type": "AND",
+                    "conditions": [
+                        {"scope": "#/properties/_showPhysicalStructure", "schema": {"const": True}},
+                        {
+                            "type": "OR",
+                            "conditions": [
+                                {"scope": "#/properties/schema:encodingFormat", "schema": {"const": mime}}
+                                for mime in TABULAR_MIMES + SPREADSHEET_MIMES
+                            ],
+                        },
+                    ],
+                },
+            },
+            "elements": [
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("csvw:delimiter", "Delimiter"),
+                        _fd_ctrl("csvw:header", "Has Header"),
+                        _fd_ctrl("csvw:headerRowCount", "Header Row Count"),
+                    ],
+                },
+                {
+                    "type": "HorizontalLayout",
+                    "elements": [
+                        _fd_ctrl("countRows", "Row Count"),
+                        _fd_ctrl("countColumns", "Column Count"),
+                    ],
+                },
+                {
+                    "type": "Control",
+                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "label": "Column Mapping",
+                    "options": {
+                        "elementLabelProp": "cdi:formats_InstanceVariable",
+                        "detail": PHYSICAL_MAPPING_DETAIL,
+                        "initCollapsed": True,
+                    },
+                },
+            ],
+        },
+        # Data cube physical mapping (HDF5/NetCDF)
+        {
+            "type": "Group",
+            "label": "Data Cube Structure",
+            "rule": {
+                "effect": "SHOW",
+                "condition": {
+                    "type": "AND",
+                    "conditions": [
+                        {"scope": "#/properties/_showPhysicalStructure", "schema": {"const": True}},
+                        {
+                            "type": "OR",
+                            "conditions": [
+                                {"scope": "#/properties/schema:encodingFormat", "schema": {"const": mime}}
+                                for mime in DATACUBE_MIMES
+                            ],
+                        },
+                    ],
+                },
+            },
+            "elements": [
+                {
+                    "type": "Control",
+                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "label": "Variable Mapping",
+                    "options": {
+                        "elementLabelProp": "cdi:formats_InstanceVariable",
+                        "detail": PHYSICAL_MAPPING_DATACUBE_DETAIL,
+                        "initCollapsed": True,
+                    },
+                },
+            ],
+        },
+    ],
+}
+
 
 DISTRIBUTION_DETAIL = {
     "type": "VerticalLayout",
@@ -1037,6 +1140,11 @@ def inject_schema_defaults(schema, profile_name=None):
                 "type": "string",
                 "enum": mime_enum,
             }
+            # Inject _showPhysicalStructure toggle for progressive disclosure
+            hp_props["_showPhysicalStructure"] = {
+                "type": "boolean",
+                "default": False,
+            }
 
         # --- physicalMapping item defaults ---
         # Inject _showAdvanced boolean and simplify formats_InstanceVariable
@@ -1111,6 +1219,12 @@ def _walk(node, person_names=None, profile_name=None):
             options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL)
         else:
             options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL_BASIC)
+
+    # --- hasPart detail with physical structure toggle ---
+    if scope.endswith("schema:hasPart") and _is_ada_profile(profile_name):
+        options = node.setdefault("options", {})
+        options["elementLabelProp"] = "schema:name"
+        options["detail"] = copy.deepcopy(BUNDLE_HAS_PART_DETAIL)
 
     # Recurse into child nodes
     for child in node.get("elements", []):

@@ -1,12 +1,9 @@
 """
 Bundle introspection service.
 
-Integrates inspectors from the ``ada_metadata_forms`` package to extract
-metadata hints from uploaded ZIP bundles.  The results are returned as a
-dict suitable for pre-populating form fields in the frontend.
-
-If ``ada_metadata_forms`` is not installed, introspection gracefully
-returns an empty result with a warning.
+Inspects uploaded ZIP bundles to extract metadata hints from individual
+files.  The results are returned as a dict suitable for pre-populating
+form fields in the frontend (variableMeasured, file descriptions, etc.).
 """
 
 from __future__ import annotations
@@ -18,44 +15,25 @@ import zipfile
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ada_bridge.inspectors import (
+    inspect_csv,
+    inspect_excel,
+    inspect_hdf5,
+    inspect_netcdf,
+    inspect_pdf,
+    inspect_text,
+)
+
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Optional imports — ada_metadata_forms may not be installed
-# ---------------------------------------------------------------------------
-
-try:
-    from bundle_ingestion.services.zip_inspector import ZipInspector
-
-    _HAS_ZIP_INSPECTOR = True
-except ImportError:
-    _HAS_ZIP_INSPECTOR = False
-
-try:
-    from bundle_ingestion.services.csv_inspector import CSVInspector
-
-    _HAS_CSV_INSPECTOR = True
-except ImportError:
-    _HAS_CSV_INSPECTOR = False
-
-try:
-    from bundle_ingestion.services.image_inspector import ImageInspector
-
-    _HAS_IMAGE_INSPECTOR = True
-except ImportError:
-    _HAS_IMAGE_INSPECTOR = False
-
-try:
-    from bundle_ingestion.services.hdf5_inspector import HDF5Inspector
-
-    _HAS_HDF5_INSPECTOR = True
-except ImportError:
-    _HAS_HDF5_INSPECTOR = False
-
 # File extension sets for dispatch
-_CSV_EXTENSIONS = {".csv", ".tsv"}
+_CSV_EXTENSIONS = {".csv", ".tsv", ".tab"}
+_EXCEL_EXTENSIONS = {".xlsx", ".xls"}
 _IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff"}
 _HDF5_EXTENSIONS = {".h5", ".hdf5", ".he5", ".hdf"}
+_NETCDF_EXTENSIONS = {".nc", ".nc4", ".cdf"}
+_PDF_EXTENSIONS = {".pdf"}
+_TEXT_EXTENSIONS = {".txt", ".text", ".md", ".rst"}
 
 
 # ---------------------------------------------------------------------------
@@ -83,12 +61,16 @@ def introspect_bundle(file_path: str) -> Dict[str, Any]:
     result: Dict[str, Any] = {
         "manifest": [],
         "files": {},
+        "archive_size": 0,
         "warnings": [],
     }
 
     if not zipfile.is_zipfile(file_path):
         result["warnings"].append("Uploaded file is not a valid ZIP archive.")
         return result
+
+    # Total size of the ZIP archive itself
+    result["archive_size"] = os.path.getsize(file_path)
 
     # Step 1: Get manifest
     manifest = _get_manifest(file_path)
@@ -109,12 +91,6 @@ def introspect_bundle(file_path: str) -> Dict[str, Any]:
             if inspection:
                 result["files"][relative_path] = inspection
 
-    if not any([_HAS_CSV_INSPECTOR, _HAS_IMAGE_INSPECTOR, _HAS_HDF5_INSPECTOR]):
-        result["warnings"].append(
-            "ada_metadata_forms is not installed; introspection is limited to "
-            "ZIP manifest only."
-        )
-
     return result
 
 
@@ -124,14 +100,6 @@ def introspect_bundle(file_path: str) -> Dict[str, Any]:
 
 def _get_manifest(file_path: str) -> List[str]:
     """Return the list of file paths inside a ZIP archive."""
-    if _HAS_ZIP_INSPECTOR:
-        try:
-            inspector = ZipInspector(file_path)
-            return inspector.get_manifest()
-        except Exception:
-            logger.exception("ZipInspector failed, falling back to zipfile")
-
-    # Fallback: use stdlib zipfile
     with zipfile.ZipFile(file_path, "r") as zf:
         return [
             name for name in zf.namelist()
@@ -142,17 +110,29 @@ def _get_manifest(file_path: str) -> List[str]:
 def _inspect_file(full_path: str, ext: str) -> Dict[str, Any] | None:
     """Dispatch to the appropriate inspector based on file extension."""
     try:
-        if ext in _CSV_EXTENSIONS and _HAS_CSV_INSPECTOR:
-            inspector = CSVInspector(full_path)
-            return inspector.inspect()
+        if ext in _CSV_EXTENSIONS:
+            return inspect_csv(full_path)
 
-        if ext in _IMAGE_EXTENSIONS and _HAS_IMAGE_INSPECTOR:
-            inspector = ImageInspector(full_path)
-            return inspector.inspect()
+        if ext in _EXCEL_EXTENSIONS:
+            return inspect_excel(full_path)
 
-        if ext in _HDF5_EXTENSIONS and _HAS_HDF5_INSPECTOR:
-            inspector = HDF5Inspector(full_path)
-            return inspector.inspect()
+        if ext in _HDF5_EXTENSIONS:
+            return inspect_hdf5(full_path)
+
+        if ext in _NETCDF_EXTENSIONS:
+            return inspect_netcdf(full_path)
+
+        if ext in _PDF_EXTENSIONS:
+            return inspect_pdf(full_path)
+
+        if ext in _TEXT_EXTENSIONS:
+            return inspect_text(full_path)
+
+        # For unrecognized types, return basic file info
+        return {
+            "size": os.path.getsize(full_path),
+            "warnings": [],
+        }
     except Exception:
         logger.exception("Inspector failed for %s", full_path)
 
