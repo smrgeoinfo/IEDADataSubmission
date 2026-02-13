@@ -13,12 +13,10 @@ Endpoints:
     GET  /api/ada-bridge/bundle/{session_id}/                     — get session state
     PATCH /api/ada-bridge/bundle/{session_id}/                    — update session (product_yaml, jsonld_draft)
     POST /api/ada-bridge/bundle/{session_id}/submit/      — save to catalog + push to ADA
-    GET  /api/ada-bridge/bundle/browse-directory/          — list directory contents for browser dialog
     GET  /api/ada-bridge/lookup/                          — look up ADA record by DOI
 """
 
 import logging
-import os
 
 from rest_framework import permissions, status
 from rest_framework.decorators import api_view, parser_classes, permission_classes
@@ -39,7 +37,6 @@ from ada_bridge.serializers import (
     SyncResponseSerializer,
 )
 from ada_bridge.services import (
-    _validate_directory_path,
     create_bundle_session,
     introspect_bundle_session,
     push_record_to_ada,
@@ -315,75 +312,6 @@ def bundle_session_select_product_view(request, session_id):
         )
 
     return Response(BundleSessionSerializer(session).data, status=status.HTTP_200_OK)
-
-
-# ---------------------------------------------------------------------------
-# Directory browser
-# ---------------------------------------------------------------------------
-
-
-@api_view(["GET"])
-@permission_classes([permissions.IsAuthenticated])
-def browse_directory_view(request):
-    """
-    List directory contents for the server-directory browser dialog.
-
-    Query params:
-        path — directory to list (default: show allowed roots or /)
-    """
-    requested = request.query_params.get("path", "").strip()
-    allowed = getattr(settings, "BUNDLE_ALLOWED_DIRECTORIES", [])
-
-    # Root case: no path requested — return allowed directories as top-level entries
-    if not requested or requested == "/":
-        if allowed:
-            entries = []
-            for d in sorted(allowed):
-                resolved = os.path.realpath(d)
-                if os.path.isdir(resolved):
-                    entries.append({"name": os.path.basename(resolved) or resolved, "path": resolved, "type": "directory"})
-            return Response({"path": "/", "parent": None, "entries": entries})
-        # No allowlist — list root (/)
-        requested = "/"
-
-    # Validate path
-    try:
-        resolved = _validate_directory_path(requested)
-    except ValueError as exc:
-        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-
-    parent = os.path.dirname(resolved)
-    # If parent would escape the allowed tree, set parent to None
-    if allowed:
-        try:
-            _validate_directory_path(parent)
-        except ValueError:
-            parent = None
-
-    entries = []
-    try:
-        with os.scandir(resolved) as it:
-            for entry in it:
-                if entry.name.startswith("."):
-                    continue
-                if entry.is_dir(follow_symlinks=False):
-                    entries.append({"name": entry.name, "type": "directory"})
-                elif entry.is_file(follow_symlinks=False):
-                    try:
-                        size = entry.stat().st_size
-                    except OSError:
-                        size = 0
-                    entries.append({"name": entry.name, "type": "file", "size": size})
-    except PermissionError:
-        return Response(
-            {"detail": f"Permission denied: {resolved}"},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
-    # Sort: directories first (alphabetically), then files (alphabetically)
-    entries.sort(key=lambda e: (0 if e["type"] == "directory" else 1, e["name"].lower()))
-
-    return Response({"path": resolved, "parent": parent, "entries": entries})
 
 
 # ---------------------------------------------------------------------------
