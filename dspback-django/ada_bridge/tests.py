@@ -22,7 +22,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from ada_bridge.bundle_service import introspect_bundle
+from ada_bridge.bundle_service import introspect_bundle, introspect_directory, zip_directory
 from ada_bridge.models import AdaRecordLink
 from ada_bridge.translator_ada import (
     _get,
@@ -809,3 +809,140 @@ class TranslatorPayloadFormatTest(TestCase):
     def test_specific_type_is_camel_case(self):
         payload = jsonld_to_ada(FULL_JSONLD)
         self.assertIn("specificType", payload)
+
+
+# ===================================================================
+# bundle_service.py — Directory introspection tests
+# ===================================================================
+
+
+class DirectoryIntrospectionTest(TestCase):
+    def _create_dir(self, files: dict) -> str:
+        """Create a temp directory with given {relative_path: content} mapping."""
+        tmpdir = tempfile.mkdtemp()
+        for rel_path, content in files.items():
+            full_path = os.path.join(tmpdir, rel_path)
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            with open(full_path, "w") as f:
+                f.write(content)
+        return tmpdir
+
+    def test_introspect_directory(self):
+        tmpdir = self._create_dir({
+            "data.csv": "a,b,c\n1,2,3\n",
+            "readme.txt": "Hello",
+            "subdir/nested.csv": "x,y\n4,5\n",
+        })
+        try:
+            result = introspect_directory(tmpdir)
+            self.assertIn("manifest", result)
+            manifest = result["manifest"]
+            self.assertIn("data.csv", manifest)
+            self.assertIn("readme.txt", manifest)
+            self.assertIn("subdir/nested.csv", manifest)
+            self.assertIsInstance(result["files"], dict)
+            self.assertGreater(result["archive_size"], 0)
+            self.assertEqual(result["warnings"], [])
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_introspect_directory_skips_hidden(self):
+        tmpdir = self._create_dir({
+            "visible.txt": "Hello",
+            ".hidden_file": "secret",
+            ".hidden_dir/file.txt": "nested secret",
+        })
+        try:
+            result = introspect_directory(tmpdir)
+            manifest = result["manifest"]
+            self.assertIn("visible.txt", manifest)
+            self.assertNotIn(".hidden_file", manifest)
+            # The hidden dir and its contents should be skipped
+            for entry in manifest:
+                self.assertFalse(entry.startswith(".hidden_dir"))
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_introspect_nonexistent_directory(self):
+        result = introspect_directory("/nonexistent/path/1234567890")
+        self.assertEqual(result["manifest"], [])
+        self.assertTrue(len(result["warnings"]) > 0)
+
+    def test_zip_directory(self):
+        tmpdir = self._create_dir({
+            "data.csv": "a,b\n1,2\n",
+            "sub/nested.txt": "text content",
+        })
+        try:
+            zip_path = zip_directory(tmpdir)
+            try:
+                self.assertTrue(zipfile.is_zipfile(zip_path))
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    names = zf.namelist()
+                    self.assertIn("data.csv", names)
+                    self.assertIn("sub/nested.txt", names)
+            finally:
+                os.unlink(zip_path)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+    def test_zip_directory_skips_hidden(self):
+        tmpdir = self._create_dir({
+            "visible.txt": "Hello",
+            ".hidden": "secret",
+        })
+        try:
+            zip_path = zip_directory(tmpdir)
+            try:
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    names = zf.namelist()
+                    self.assertIn("visible.txt", names)
+                    self.assertNotIn(".hidden", names)
+            finally:
+                os.unlink(zip_path)
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)
+
+
+class DirectoryPathValidationTest(TestCase):
+    def test_rejects_nonexistent_path(self):
+        from ada_bridge.services import _validate_directory_path
+        with self.assertRaises(ValueError):
+            _validate_directory_path("/nonexistent/path/1234567890")
+
+    def test_accepts_existing_directory(self):
+        from ada_bridge.services import _validate_directory_path
+        tmpdir = tempfile.mkdtemp()
+        try:
+            result = _validate_directory_path(tmpdir)
+            self.assertEqual(result, os.path.realpath(tmpdir))
+        finally:
+            os.rmdir(tmpdir)
+
+    @override_settings(BUNDLE_ALLOWED_DIRECTORIES=["/allowed/path"])
+    def test_rejects_path_outside_allowlist(self):
+        from ada_bridge.services import _validate_directory_path
+        tmpdir = tempfile.mkdtemp()
+        try:
+            with self.assertRaises(ValueError) as ctx:
+                _validate_directory_path(tmpdir)
+            self.assertIn("not under an allowed prefix", str(ctx.exception))
+        finally:
+            os.rmdir(tmpdir)
+
+    def test_accepts_path_under_allowlist(self):
+        from ada_bridge.services import _validate_directory_path
+        tmpdir = tempfile.mkdtemp()
+        subdir = os.path.join(tmpdir, "child")
+        os.makedirs(subdir)
+        try:
+            with self.settings(BUNDLE_ALLOWED_DIRECTORIES=[tmpdir]):
+                result = _validate_directory_path(subdir)
+                self.assertEqual(result, os.path.realpath(subdir))
+        finally:
+            import shutil
+            shutil.rmtree(tmpdir)

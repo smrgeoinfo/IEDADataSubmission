@@ -94,10 +94,6 @@ def introspect_bundle(file_path: str) -> Dict[str, Any]:
     return result
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
 def _get_manifest(file_path: str) -> List[str]:
     """Return the list of file paths inside a ZIP archive."""
     with zipfile.ZipFile(file_path, "r") as zf:
@@ -106,6 +102,104 @@ def _get_manifest(file_path: str) -> List[str]:
             if not name.endswith("/")  # skip directories
         ]
 
+
+def introspect_directory(dir_path: str) -> Dict[str, Any]:
+    """
+    Inspect files in a directory (as if they were ZIP contents).
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to the directory on disk.
+
+    Returns
+    -------
+    dict
+        ``{"manifest": [...], "files": {...}, "archive_size": ..., "warnings": [...]}``
+    """
+    result: Dict[str, Any] = {
+        "manifest": [],
+        "files": {},
+        "archive_size": 0,
+        "warnings": [],
+    }
+
+    if not os.path.isdir(dir_path):
+        result["warnings"].append(f"Path is not a valid directory: {dir_path}")
+        return result
+
+    total_size = 0
+    manifest: List[str] = []
+
+    for root, dirs, files in os.walk(dir_path):
+        # Skip hidden directories in-place
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
+
+        for filename in files:
+            # Skip hidden files
+            if filename.startswith("."):
+                continue
+
+            full_path = os.path.join(root, filename)
+            relative_path = os.path.relpath(full_path, dir_path)
+            # Normalise to forward slashes for consistency with ZIP manifests
+            relative_path = relative_path.replace("\\", "/")
+
+            manifest.append(relative_path)
+            try:
+                total_size += os.path.getsize(full_path)
+            except OSError:
+                pass
+
+    result["manifest"] = manifest
+    result["archive_size"] = total_size
+
+    for relative_path in manifest:
+        full_path = os.path.join(dir_path, relative_path)
+        if not os.path.isfile(full_path):
+            continue
+
+        ext = Path(relative_path).suffix.lower()
+        inspection = _inspect_file(full_path, ext)
+        if inspection:
+            result["files"][relative_path] = inspection
+
+    return result
+
+
+def zip_directory(dir_path: str) -> str:
+    """
+    Create a ZIP archive from a directory.
+
+    Parameters
+    ----------
+    dir_path : str
+        Path to the directory to compress.
+
+    Returns
+    -------
+    str
+        Path to the temporary ZIP file. Caller is responsible for cleanup.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    tmp.close()
+
+    with zipfile.ZipFile(tmp.name, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, dirs, files in os.walk(dir_path):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            for filename in files:
+                if filename.startswith("."):
+                    continue
+                full_path = os.path.join(root, filename)
+                arcname = os.path.relpath(full_path, dir_path).replace("\\", "/")
+                zf.write(full_path, arcname)
+
+    return tmp.name
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _inspect_file(full_path: str, ext: str) -> Dict[str, Any] | None:
     """Dispatch to the appropriate inspector based on file extension."""

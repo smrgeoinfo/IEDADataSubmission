@@ -81,6 +81,10 @@ class BundleSession(models.Model):
         default="",
         help_text="Selected OGC Building Block profile identifier",
     )
+    is_directory = models.BooleanField(
+        default=False,
+        help_text="True when bundle_path points to a directory instead of a ZIP file",
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,

@@ -197,3 +197,9 @@ OUTSIDE_HOST = os.environ.get("OUTSIDE_HOST", "localhost")
 
 ADA_API_BASE_URL = os.environ.get("ADA_API_BASE_URL", "http://localhost:8000")
 ADA_API_KEY = os.environ.get("ADA_API_KEY", "")
+
+# --- Bundle directory introspection ---
+# Allowlist of server-side directories users may point to for bundle introspection.
+# Empty list = allow any directory (suitable for local dev).
+# Production deployments should restrict to specific mount points.
+BUNDLE_ALLOWED_DIRECTORIES: list[str] = []

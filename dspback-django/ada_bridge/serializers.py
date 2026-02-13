@@ -52,11 +52,22 @@ class BundleUploadSerializer(serializers.Serializer):
 
     file = serializers.FileField(required=False)
     url = serializers.URLField(required=False, help_text="URL to a ZIP bundle file")
+    directory_path = serializers.CharField(
+        required=False,
+        help_text="Server-side directory path to introspect as a bundle",
+    )
     record_id = serializers.UUIDField(required=False, help_text="IEDA record ID to link the bundle to")
 
     def validate(self, data):
-        if not data.get("file") and not data.get("url"):
-            raise serializers.ValidationError("Either 'file' or 'url' must be provided.")
+        sources = sum(bool(data.get(k)) for k in ("file", "url", "directory_path"))
+        if sources == 0:
+            raise serializers.ValidationError(
+                "One of 'file', 'url', or 'directory_path' must be provided."
+            )
+        if sources > 1:
+            raise serializers.ValidationError(
+                "Only one of 'file', 'url', or 'directory_path' may be provided."
+            )
         return data
 
 
@@ -69,6 +80,7 @@ class BundleSessionSerializer(serializers.ModelSerializer):
             "id",
             "session_id",
             "bundle_path",
+            "is_directory",
             "product_yaml",
             "introspection_result",
             "jsonld_draft",
@@ -81,6 +93,7 @@ class BundleSessionSerializer(serializers.ModelSerializer):
             "id",
             "session_id",
             "bundle_path",
+            "is_directory",
             "introspection_result",
             "status",
             "created_at",

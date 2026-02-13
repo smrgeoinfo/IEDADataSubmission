@@ -171,9 +171,9 @@ def bundle_upload_view(request, record_id):
 
 @api_view(["POST"])
 @permission_classes([permissions.IsAuthenticated])
-@parser_classes([MultiPartParser])
+@parser_classes([MultiPartParser, JSONParser])
 def bundle_session_upload_view(request):
-    """Accept a ZIP file or URL, create a BundleSession, return session_id."""
+    """Accept a ZIP file, URL, or server directory path. Create a BundleSession."""
     serializer = BundleUploadSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
 
@@ -182,6 +182,7 @@ def bundle_session_upload_view(request):
             user=request.user,
             file_obj=serializer.validated_data.get("file"),
             url=serializer.validated_data.get("url"),
+            directory_path=serializer.validated_data.get("directory_path"),
         )
     except ValueError as exc:
         return Response(

@@ -17,7 +17,9 @@ from typing import Any, Dict, Optional
 from django.core.files.uploadedfile import UploadedFile
 from django.utils import timezone
 
-from ada_bridge.bundle_service import introspect_bundle
+from django.conf import settings as django_settings
+
+from ada_bridge.bundle_service import introspect_bundle, introspect_directory, zip_directory
 from ada_bridge.client import AdaClient
 from ada_bridge.models import AdaRecordLink, BundleSession
 from ada_bridge.translator_ada import (
@@ -254,10 +256,44 @@ def upload_bundle_and_introspect(
 # ---------------------------------------------------------------------------
 
 
+def _validate_directory_path(directory_path: str) -> str:
+    """
+    Validate and resolve a directory path for bundle introspection.
+
+    Checks that the path is an existing directory and, if
+    ``settings.BUNDLE_ALLOWED_DIRECTORIES`` is non-empty, that it falls
+    under one of the allowed prefixes (prevents path-traversal attacks).
+
+    Returns the resolved absolute path.
+
+    Raises
+    ------
+    ValueError
+        If the path is invalid, does not exist, or is outside the allowlist.
+    """
+    resolved = os.path.realpath(directory_path)
+    if not os.path.isdir(resolved):
+        raise ValueError(f"Directory does not exist: {directory_path}")
+
+    allowed = getattr(django_settings, "BUNDLE_ALLOWED_DIRECTORIES", [])
+    if allowed:
+        if not any(
+            resolved == os.path.realpath(prefix)
+            or resolved.startswith(os.path.realpath(prefix) + os.sep)
+            for prefix in allowed
+        ):
+            raise ValueError(
+                f"Directory path is not under an allowed prefix: {directory_path}"
+            )
+
+    return resolved
+
+
 def create_bundle_session(
     user,
     file_obj: Optional[UploadedFile] = None,
     url: Optional[str] = None,
+    directory_path: Optional[str] = None,
 ) -> BundleSession:
     """
     Create a BundleSession from an uploaded file or URL.
@@ -270,7 +306,12 @@ def create_bundle_session(
     BundleSession
         The newly created session.
     """
-    if file_obj:
+    is_directory = False
+
+    if directory_path:
+        tmp_path = _validate_directory_path(directory_path)
+        is_directory = True
+    elif file_obj:
         suffix = ".zip"
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False, dir=tempfile.gettempdir()) as tmp:
             for chunk in file_obj.chunks():
@@ -287,14 +328,16 @@ def create_bundle_session(
                 tmp.write(chunk)
             tmp_path = tmp.name
     else:
-        raise ValueError("Either 'file' or 'url' must be provided.")
+        raise ValueError("Either 'file', 'url', or 'directory_path' must be provided.")
 
+    source = "directory" if is_directory else ("upload" if file_obj else url)
     session = BundleSession.objects.create(
         user=user if user.is_authenticated else None,
         bundle_path=tmp_path,
+        is_directory=is_directory,
         status=BundleSession.Status.CREATED,
     )
-    logger.info("Created bundle session %s from %s", session.session_id, "upload" if file_obj else url)
+    logger.info("Created bundle session %s from %s", session.session_id, source)
     return session
 
 
@@ -312,14 +355,21 @@ def introspect_bundle_session(session: BundleSession) -> BundleSession:
     BundleSession
         The updated session with introspection_result populated.
     """
-    if not os.path.isfile(session.bundle_path):
-        raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
+    if session.is_directory:
+        if not os.path.isdir(session.bundle_path):
+            raise FileNotFoundError(f"Bundle directory not found at {session.bundle_path}")
+    else:
+        if not os.path.isfile(session.bundle_path):
+            raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
 
     session.status = BundleSession.Status.INTROSPECTING
     session.save(update_fields=["status", "updated_at"])
 
     # Run introspection
-    result = introspect_bundle(session.bundle_path)
+    if session.is_directory:
+        result = introspect_directory(session.bundle_path)
+    else:
+        result = introspect_bundle(session.bundle_path)
 
     # Check for product.yaml in the manifest.
     # Match exact names first, then fall back to product-*.yaml pattern
@@ -340,14 +390,20 @@ def introspect_bundle_session(session: BundleSession) -> BundleSession:
     if product_yaml_path:
         product_yaml_found = True
         try:
-            import zipfile
             import yaml
 
-            with zipfile.ZipFile(session.bundle_path, "r") as zf:
-                with zf.open(product_yaml_path) as f:
+            if session.is_directory:
+                full_yaml_path = os.path.join(session.bundle_path, product_yaml_path)
+                with open(full_yaml_path, "r") as f:
                     product_data = yaml.safe_load(f)
-                    if isinstance(product_data, dict):
-                        session.product_yaml = product_data
+            else:
+                import zipfile
+                with zipfile.ZipFile(session.bundle_path, "r") as zf:
+                    with zf.open(product_yaml_path) as f:
+                        product_data = yaml.safe_load(f)
+
+            if isinstance(product_data, dict):
+                session.product_yaml = product_data
         except Exception:
             logger.exception("Failed to parse product YAML from bundle")
 
@@ -391,19 +447,17 @@ def select_product_yaml(session: BundleSession, filepath: str) -> BundleSession:
     ValueError
         If the selected file is not valid YAML or not a mapping.
     """
-    import zipfile
-
     import yaml
 
-    if not os.path.isfile(session.bundle_path):
-        raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
+    if session.is_directory:
+        if not os.path.isdir(session.bundle_path):
+            raise FileNotFoundError(f"Bundle directory not found at {session.bundle_path}")
 
-    with zipfile.ZipFile(session.bundle_path, "r") as zf:
-        # Verify the file exists in the archive
-        if filepath not in zf.namelist():
-            raise FileNotFoundError(f"File '{filepath}' not found in bundle archive.")
+        full_path = os.path.join(session.bundle_path, filepath)
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError(f"File '{filepath}' not found in bundle directory.")
 
-        with zf.open(filepath) as f:
+        with open(full_path, "r") as f:
             try:
                 product_data = yaml.safe_load(f)
             except yaml.YAMLError as exc:
@@ -414,6 +468,27 @@ def select_product_yaml(session: BundleSession, filepath: str) -> BundleSession:
 
             session.product_yaml = product_data
             session.save(update_fields=["product_yaml", "updated_at"])
+    else:
+        import zipfile
+
+        if not os.path.isfile(session.bundle_path):
+            raise FileNotFoundError(f"Bundle file not found at {session.bundle_path}")
+
+        with zipfile.ZipFile(session.bundle_path, "r") as zf:
+            if filepath not in zf.namelist():
+                raise FileNotFoundError(f"File '{filepath}' not found in bundle archive.")
+
+            with zf.open(filepath) as f:
+                try:
+                    product_data = yaml.safe_load(f)
+                except yaml.YAMLError as exc:
+                    raise ValueError(f"Failed to parse YAML: {exc}")
+
+                if not isinstance(product_data, dict):
+                    raise ValueError("Selected file is not a valid YAML mapping.")
+
+                session.product_yaml = product_data
+                session.save(update_fields=["product_yaml", "updated_at"])
 
     logger.info(
         "Selected product YAML '%s' for bundle session %s",
@@ -442,6 +517,14 @@ def submit_bundle_session(
     dict
         Result including catalog_record_id and ADA push status.
     """
+    # Auto-zip directory-based sessions before push
+    if session.is_directory:
+        zip_path = zip_directory(session.bundle_path)
+        session.bundle_path = zip_path
+        session.is_directory = False
+        session.save(update_fields=["bundle_path", "is_directory", "updated_at"])
+        logger.info("Auto-zipped directory for session %s -> %s", session.session_id, zip_path)
+
     result: Dict[str, Any] = {
         "session_id": str(session.session_id),
         "status": "submitted",
