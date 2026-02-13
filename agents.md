@@ -282,9 +282,10 @@ To add a new technique profile (e.g., `adaXRF`):
 2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `OCGbuildingBlockTest` directory.
 3. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
 4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
-5. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
-6. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
-7. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
+5. **Measurement details** *(optional)* — If the technique has a dedicated detail building block (e.g., `detailXRF/`) with measurement properties, add an entry to `PROFILE_MEASUREMENT_CONTROLS` in `dspback-django/records/uischema_injection.py`. Use the `_ct_ctrl(prop, label)` helper for controls. The measurement group is automatically inserted after each ComponentType dropdown in the form.
+6. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
+7. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
+8. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
 ### Adding a New CDIF Profile
 
@@ -329,7 +330,7 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
-| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, MIME type enum on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM |
+| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, technique-specific measurement detail groups (VNMIR/EMPA/XRD), MIME type enum on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM |
 | `dspback-django/records/tests.py` | 130 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup, hasPart groups |
 | `dspback-django/ada_bridge/tests.py` | 74 tests: translator unit tests (62, SQLite), push/sync/status integration tests (12, PostgreSQL) |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
@@ -431,7 +432,25 @@ The CDIF Discovery profile schema is built from OGC Building Block source schema
 
 ### Serve-Time Injection Pattern
 
-All form customizations (vocabulary, variable panel, distribution detail, MIME types) use the same pattern: `ProfileSerializer.to_representation()` calls `inject_uischema()` and `inject_schema_defaults()` which modify the schema/uischema deep copies before returning to the frontend. UI-only fields (`_showAdvanced`, `_distributionType`) are injected at serve time and stripped by `RecordSerializer.validate()` before storage. This means no OGC Building Block schema files need editing for form UX changes.
+All form customizations (vocabulary, variable panel, distribution detail, MIME types, measurement details) use the same pattern: `ProfileSerializer.to_representation()` calls `inject_uischema()` and `inject_schema_defaults()` which modify the schema/uischema deep copies before returning to the frontend. UI-only fields (`_showAdvanced`, `_distributionType`) are injected at serve time and stripped by `RecordSerializer.validate()` before storage. This means no OGC Building Block schema files need editing for form UX changes.
+
+### Technique-Specific Measurement Details
+
+ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties that come from building block detail schemas (e.g., `detailVNMIR/`, `detailEMPA/`, `detailXRD/`). These properties live inside `fileDetail.componentType` in the schema.
+
+**Schema pipeline**: `convert_for_jsonforms.py`'s `simplify_file_detail_anyof()` calls `_collect_component_type_info()` which collects both `@type` enum values AND non-`@type` properties (e.g., `detector`, `beamsplitter`, `spectralResolution`) from each componentType anyOf branch. The detail properties are merged into `componentType.properties` alongside `@type`.
+
+**UISchema injection**: `PROFILE_MEASUREMENT_CONTROLS` in `uischema_injection.py` maps each technique profile to its measurement detail UI controls. The `_inject_measurement_group()` function inserts a "Measurement Details" group after each ComponentType dropdown in every file-type detail group (Image, Tabular, Data Cube, Document). This happens for both distribution-level and hasPart-level details.
+
+| Profile | Measurement Group | Properties |
+|---------|------------------|------------|
+| adaVNMIR | VNMIR Measurement Details | detector, beamsplitter, spectralResolution, spectralSampling, spotSize, numberOfScans, emissionAngle, incidenceAngle, phaseAngle, sampleTemperature, samplePreparation, sampleHeated, vacuumExposedSample, environmentalPressure, uncertaintyNoise, eMaxFitRegionMin/Max, emissivityMaximum, calibrationStandards, comments, measurement, measurementEnvironment, spectralRangeMin/Max |
+| adaEMPA | EMPA Measurement Details | spectrometersUsed, signalUsed |
+| adaXRD | XRD Measurement Details | geometry, sampleMount, stepSize, timePerStep, wavelength |
+| adaICPMS | *(none)* | No dedicated detail schema |
+| adaProduct | *(none)* | Generic profile — no measurement details |
+
+To add measurement details for a new technique profile, add an entry to `PROFILE_MEASUREMENT_CONTROLS` with the profile name, group label, and control elements. The `_ct_ctrl(prop, label)` helper generates controls scoped to `#/properties/fileDetail/properties/componentType/properties/{prop}`.
 
 ## ADA Bridge (ada_bridge app)
 

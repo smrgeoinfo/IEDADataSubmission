@@ -126,6 +126,8 @@ My Submissions page shows both:
 
 Seven profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), `CDIFDiscovery`, and `CDIFxas` (XAS-specific CDIF profile). The profile list is fetched dynamically from the catalog API.
 
+Technique-specific ADA profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties in the form — fields like detector, beamsplitter, spectral resolution for VNMIR, or geometry, wavelength for XRD. These properties come from the building block detail schemas (e.g., `detailVNMIR/`), are preserved in `componentType` during schema conversion, and are surfaced via `PROFILE_MEASUREMENT_CONTROLS` in `uischema_injection.py`. The generic `adaProduct` and CDIF profiles do not show measurement details.
+
 #### Adding a New ADA Profile
 
 To add a new technique profile (e.g., `adaXRF`):
@@ -195,7 +197,7 @@ dspback-django/
 │   ├── views.py             # ProfileViewSet, RecordViewSet, persons/orgs search
 │   ├── validators.py        # JSON Schema validation (Draft-07 / Draft-2020-12)
 │   ├── services.py          # JSON-LD field extraction, entity upsert, URL import
-│   ├── uischema_injection.py # UISchema tree walker (vocabulary + variable panel layout)
+│   ├── uischema_injection.py # UISchema tree walker (vocabulary + variable panel + measurement details)
 │   ├── admin.py             # Django admin registration
 │   ├── tests.py             # 130 tests
 │   └── management/commands/

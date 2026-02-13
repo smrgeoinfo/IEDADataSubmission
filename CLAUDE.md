@@ -77,6 +77,15 @@ Quick checklist:
 - Frontend profile selection auto-discovers CDIF profiles (names starting with `CDIF`, excluding `CDIFDiscovery`)
 - ADA technique profiles need `base_profile` FK set via `PARENT_PROFILES` in `load_profiles.py`
 
+## Technique-Specific Measurement Details
+
+ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties from building block detail schemas. These properties live inside `fileDetail.componentType` in the schema.
+
+- **Schema pipeline**: `_collect_component_type_info()` in `convert_for_jsonforms.py` collects both `@type` enum values AND non-`@type` detail properties from componentType anyOf branches, merging them into `componentType.properties`
+- **UISchema injection**: `PROFILE_MEASUREMENT_CONTROLS` in `uischema_injection.py` maps technique profiles to measurement detail UI controls. `_inject_measurement_group()` inserts the group after each ComponentType dropdown in all file-type detail groups (Image, Tabular, Data Cube, Document)
+- **adaProduct/adaICPMS/CDIF**: No measurement detail groups injected (not in `PROFILE_MEASUREMENT_CONTROLS`)
+- To add measurement details for a new technique, add an entry to `PROFILE_MEASUREMENT_CONTROLS` using `_ct_ctrl(prop, label)` helper
+
 ## Distribution Schema Flattening
 
 The `schema:distribution` schema is `type: array` in the canonical JSON-LD but the uischema scopes into it as an object (archive info + hasPart file list as separate groups). Both `MetadataFormStep.vue` (bundle wizard) and `geodat.ada-profile-form.vue` (profile form) flatten the schema at load time:

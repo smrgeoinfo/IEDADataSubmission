@@ -193,6 +193,121 @@ GENERIC_COMPONENT_TYPES = [
 ]
 
 # ---------------------------------------------------------------------------
+# Per-profile measurement detail controls
+# ---------------------------------------------------------------------------
+
+def _ct_ctrl(prop, label):
+    """Shorthand for a componentType property control."""
+    return {
+        "type": "Control",
+        "scope": f"#/properties/fileDetail/properties/componentType/properties/{prop}",
+        "label": label,
+    }
+
+PROFILE_MEASUREMENT_CONTROLS = {
+    "adaVNMIR": {
+        "label": "VNMIR Measurement Details",
+        "elements": [
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("detector", "Detector"),
+                _ct_ctrl("beamsplitter", "Beamsplitter"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("measurement", "Measurement"),
+                _ct_ctrl("measurementEnvironment", "Measurement Environment"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("spectralRangeMin", "Spectral Range Min"),
+                _ct_ctrl("spectralRangeMax", "Spectral Range Max"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("spectralResolution", "Spectral Resolution"),
+                _ct_ctrl("spectralSampling", "Spectral Sampling"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("spotSize", "Spot Size"),
+                _ct_ctrl("numberOfScans", "Number of Scans"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("emissionAngle", "Emission Angle"),
+                _ct_ctrl("incidenceAngle", "Incidence Angle"),
+                _ct_ctrl("phaseAngle", "Phase Angle"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("sampleTemperature", "Sample Temperature"),
+                _ct_ctrl("samplePreparation", "Sample Preparation"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("sampleHeated", "Sample Heated"),
+                _ct_ctrl("vacuumExposedSample", "Vacuum Exposed Sample"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("environmentalPressure", "Environmental Pressure"),
+                _ct_ctrl("uncertaintyNoise", "Uncertainty Noise"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("eMaxFitRegionMin", "E-Max Fit Region Min"),
+                _ct_ctrl("eMaxFitRegionMax", "E-Max Fit Region Max"),
+                _ct_ctrl("emissivityMaximum", "Emissivity Maximum"),
+            ]},
+            _ct_ctrl("calibrationStandards", "Calibration Standards"),
+            _ct_ctrl("comments", "Comments"),
+        ],
+    },
+    "adaEMPA": {
+        "label": "EMPA Measurement Details",
+        "elements": [
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("spectrometersUsed", "Spectrometers Used"),
+                _ct_ctrl("signalUsed", "Signal Used"),
+            ]},
+        ],
+    },
+    "adaXRD": {
+        "label": "XRD Measurement Details",
+        "elements": [
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("geometry", "Geometry"),
+                _ct_ctrl("sampleMount", "Sample Mount"),
+            ]},
+            {"type": "HorizontalLayout", "elements": [
+                _ct_ctrl("stepSize", "Step Size"),
+                _ct_ctrl("timePerStep", "Time Per Step"),
+                _ct_ctrl("wavelength", "Wavelength"),
+            ]},
+        ],
+    },
+}
+
+
+def _inject_measurement_group(detail, profile_name):
+    """Insert technique-specific measurement controls into detail groups."""
+    config = PROFILE_MEASUREMENT_CONTROLS.get(profile_name)
+    if not config:
+        return
+    measurement_group = {
+        "type": "Group",
+        "label": config["label"],
+        "elements": copy.deepcopy(config["elements"]),
+    }
+    _insert_after_component_type(detail.get("elements", []), measurement_group)
+
+
+def _insert_after_component_type(elements, measurement_group):
+    """Recursively find ComponentType controls and insert measurement group after them."""
+    for element in elements:
+        sub = element.get("elements", [])
+        for i, el in enumerate(sub):
+            scope = el.get("scope", "")
+            if "ComponentType" in scope and scope.startswith("#/properties/fileDetail"):
+                sub.insert(i + 1, copy.deepcopy(measurement_group))
+                break  # Inserted in this group, continue to next sibling
+        else:
+            # No ComponentType found here — recurse into sub-elements
+            _insert_after_component_type(sub, measurement_group)
+
+
+# ---------------------------------------------------------------------------
 # Per-profile MIME type filtering
 # ---------------------------------------------------------------------------
 
@@ -1347,6 +1462,8 @@ def _walk(node, person_names=None, profile_name=None):
         options["elementLabelProp"] = "schema:name"
         if _is_ada_profile(profile_name):
             options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL)
+            if profile_name in PROFILE_MEASUREMENT_CONTROLS:
+                _inject_measurement_group(options["detail"], profile_name)
         else:
             options["detail"] = copy.deepcopy(DISTRIBUTION_DETAIL_BASIC)
 
@@ -1355,6 +1472,8 @@ def _walk(node, person_names=None, profile_name=None):
         options = node.setdefault("options", {})
         options["elementLabelProp"] = "schema:name"
         options["detail"] = copy.deepcopy(BUNDLE_HAS_PART_DETAIL)
+        if profile_name in PROFILE_MEASUREMENT_CONTROLS:
+            _inject_measurement_group(options["detail"], profile_name)
 
     # Recurse into child nodes
     for child in node.get("elements", []):
