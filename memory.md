@@ -351,28 +351,9 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 ### Phase 3: Per-Profile MIME Type Filtering
 
-**Problem:** All MIME types appeared in the dropdown regardless of which technique profile was selected, even though each technique only supports specific file types.
+> **Superseded** by 2026-02-13 entry: `PROFILE_FILE_TYPES` replaced with `PROFILE_COMPONENT_TYPES` which auto-derives both MIME and componentType filtering for all 35 technique profiles.
 
-**Fix:** Added profile→file-types→MIME-types mapping in `uischema_injection.py`:
-
-```python
-PROFILE_FILE_TYPES = {
-    "adaProduct": "all",  # sentinel: returns full MIME_TYPE_ENUM
-    "adaEMPA": ["imageMap", "image", "tabularData", "collection", "supDocImage", "document"],
-    "adaXRD": ["tabularData", "image", "document"],
-    "adaICPMS": ["tabularData", "collection", "document"],
-    "adaVNMIR": ["tabularData", "imageMap", "dataCube", "supDocImage", "document"],
-}
-FILE_TYPE_TO_MIMES = {
-    "image": IMAGE_MIMES, "imageMap": IMAGE_MIMES, "supDocImage": IMAGE_MIMES,
-    "tabularData": TABULAR_MIMES, "dataCube": DATACUBE_MIMES,
-    "document": DOCUMENT_MIMES, "collection": ARCHIVE_MIMES,
-}
-```
-
-- `_get_profile_mime_enum(profile_name)` collects MIME types for the profile's file types, then adds ARCHIVE_MIMES and STRUCTURED_DATA_MIMES (always available).
-- `inject_schema_defaults(schema, profile_name=None)` now accepts profile name and filters the enum.
-- `ProfileSerializer.to_representation()` passes `instance.name` to `inject_schema_defaults()`.
+**Original fix:** Added profile→file-types→MIME-types mapping via `PROFILE_FILE_TYPES` dict for the original 4 profiles. This has been replaced by `PROFILE_COMPONENT_TYPES` which covers all 35 profiles and also drives componentType dropdown filtering.
 
 **Files changed:**
 - `dspback-django/records/uischema_injection.py` — encodingFormat→string, archive rule fix, MIME categories, fileDetail Groups, per-profile filtering
@@ -578,3 +559,28 @@ IEDADataSubmission (dspback-django)         ADA API (Django/DRF)
 - `catalog/urls.py` — `include("ada_bridge.urls")` under `api/ada-bridge/`
 
 **Deploy:** `docker exec catalog python manage.py migrate` to create `ada_bridge_adarecordlink` table. Set `ADA_API_BASE_URL` and `ADA_API_KEY` in `.env`.
+
+## 2026-02-13: Per-Profile MIME and componentType Filtering
+
+**Problem:** All 35 ADA technique profiles showed the same full MIME type dropdown (~26 options) and the same componentType dropdowns (full category lists). Only 4 profiles (adaEMPA, adaXRD, adaICPMS, adaVNMIR) had MIME filtering via the hardcoded `PROFILE_FILE_TYPES` dict. The per-category componentType enums were completely unfiltered.
+
+**Fix:** Replaced `PROFILE_FILE_TYPES` with a single `PROFILE_COMPONENT_TYPES` dict mapping all 35 technique profiles to their allowed `ada:`-prefixed component types. Both MIME filtering and componentType dropdown filtering are auto-derived from this dict.
+
+**How it works:**
+- `PROFILE_COMPONENT_TYPES` — Maps each profile → list of allowed component types (e.g., `"adaDSC": ["ada:DSCHeatTabular", "ada:DSCResultsTabular"]`)
+- `_derive_profile_mime_categories()` — Checks which global category lists (IMAGE, TABULAR, DATACUBE) the profile's types intersect → derives MIME categories. Document and collection always included.
+- `_get_profile_mime_enum()` — Returns filtered MIME list for a profile (replaces old `PROFILE_FILE_TYPES` lookup)
+- `_get_profile_category_components()` — Intersects profile's types with a global category list, appends `GENERIC_COMPONENT_TYPES` → used for per-category dropdown filtering
+- `inject_schema_defaults()` — `_CT_CATEGORIES` now calls `_get_profile_category_components()` for profile-filtered enums instead of static full lists
+
+**Also extended global category lists** with missing component types from the 31 generated profiles:
+- `IMAGE_COMPONENT_TYPES` +10 types (EMPAImageMap, XRDIndexedImage, VNMIRSpectraPlot, NanoSIMSImageCollection, XCTImageCollection, AIVAImageCollection, UVFMImageCollection, VLMImageCollection, SEMEDSElementalMaps, NanoIRMapCollection)
+- `TABULAR_COMPONENT_TYPES` +8 types (NanoIRPointCollection, NanoSIMSCollection, LIT2DDataCollection, LITPolarDataCollection, MCICPMSCollection, SEMEDSPointDataCollection, SIMSCollection, ARGTCollection)
+- `DATACUBE_COMPONENT_TYPES` +7 types (GCGCMSCollection, LCMSMSCollection, TOFSIMSCollection, XANESCollection, QRISCalibratedCollection, QRISRawCollection, RITOFNGMSCollection)
+- `DOCUMENT_COMPONENT_TYPES` +3 types (SLSShapeModel, SLSPartialScan, MCICPMSRaw)
+
+**Files changed:**
+- `dspback-django/records/uischema_injection.py` — Removed `PROFILE_FILE_TYPES`, added `PROFILE_COMPONENT_TYPES` + 3 helper functions, updated `inject_schema_defaults()` componentType injection
+- `dspback-django/records/tests.py` — Added 4 test classes (20 tests): `GeneratedProfileMimeFilterTest`, `ComponentTypeDropdownFilterTest`, `InjectSchemaComponentTypeFilterTest`, `BackwardCompatProfileMimeTest`. Total: 171 tests.
+- `CLAUDE.md` — Added "Per-Profile MIME and componentType Filtering" section, updated Adding a New Profile checklist
+- `agents.md` — Updated profile count, key file descriptions, test count, Adding a New ADA Profile steps, added filtering subsection

@@ -12,12 +12,20 @@ from rest_framework.test import APIClient
 from records.models import KnownOrganization, KnownPerson, Profile, Record
 from records.services import extract_known_entities, upsert_known_entities
 from records.uischema_injection import (
+    DATACUBE_COMPONENT_TYPES,
     DATACUBE_MIMES,
+    DOCUMENT_COMPONENT_TYPES,
     DOCUMENT_MIMES,
+    GENERIC_COMPONENT_TYPES,
+    IMAGE_COMPONENT_TYPES,
     IMAGE_MIMES,
     MIME_TYPE_ENUM,
     MIME_TYPE_OPTIONS,
+    PROFILE_COMPONENT_TYPES,
+    STRUCTURED_DATA_MIMES,
+    TABULAR_COMPONENT_TYPES,
     TABULAR_MIMES,
+    _get_profile_category_components,
     _get_profile_mime_enum,
     inject_schema_defaults,
     inject_uischema,
@@ -1943,3 +1951,187 @@ class ExcludeStatusFilterTest(TestCase):
         identifiers = [r["identifier"] for r in resp.json()["results"]]
         self.assertIn("rec-draft", identifiers)
         self.assertIn("rec-deprecated", identifiers)
+
+
+# ===================================================================
+# Profile-specific MIME and componentType filtering tests
+# ===================================================================
+
+
+class GeneratedProfileMimeFilterTest(TestCase):
+    """MIME filtering for generated (non-original-4) profiles."""
+
+    def test_ada_dsc_tabular_only_no_image_mimes(self):
+        """adaDSC has only tabular types — no image or datacube MIMEs."""
+        mimes = _get_profile_mime_enum("adaDSC")
+        self.assertIn("text/csv", mimes)
+        self.assertIn("text/tab-separated-values", mimes)
+        self.assertIn("application/pdf", mimes)  # document always
+        self.assertIn("application/zip", mimes)  # collection always
+        self.assertNotIn("image/tiff", mimes)
+        self.assertNotIn("application/x-hdf5", mimes)
+
+    def test_ada_l2ms_datacube_and_image(self):
+        """adaL2MS has datacube + image types — includes both MIME categories."""
+        mimes = _get_profile_mime_enum("adaL2MS")
+        self.assertIn("application/x-hdf5", mimes)
+        self.assertIn("application/x-netcdf", mimes)
+        self.assertIn("image/tiff", mimes)
+        self.assertIn("image/png", mimes)
+        self.assertIn("application/pdf", mimes)
+
+    def test_ada_sem_all_categories(self):
+        """adaSEM has image + tabular + datacube types — all MIME categories."""
+        mimes = _get_profile_mime_enum("adaSEM")
+        self.assertIn("image/tiff", mimes)
+        self.assertIn("text/csv", mimes)
+        self.assertIn("application/x-hdf5", mimes)
+        self.assertIn("application/pdf", mimes)
+        self.assertIn("application/zip", mimes)
+
+    def test_ada_dsc_includes_structured_data(self):
+        mimes = _get_profile_mime_enum("adaDSC")
+        for mime in STRUCTURED_DATA_MIMES:
+            self.assertIn(mime, mimes, f"Missing {mime} for adaDSC")
+
+    def test_ada_laf_tabular_only(self):
+        """adaLAF has only tabular types."""
+        mimes = _get_profile_mime_enum("adaLAF")
+        self.assertIn("text/csv", mimes)
+        self.assertNotIn("image/tiff", mimes)
+        self.assertNotIn("application/x-hdf5", mimes)
+
+
+class ComponentTypeDropdownFilterTest(TestCase):
+    """componentType dropdown filtering per profile."""
+
+    def test_ada_dsc_image_dropdown_generic_only(self):
+        """adaDSC has no image types — image dropdown shows only generics."""
+        result = _get_profile_category_components("adaDSC", IMAGE_COMPONENT_TYPES)
+        non_generic = [t for t in result if t not in GENERIC_COMPONENT_TYPES]
+        self.assertEqual(non_generic, [])
+        # Generics are present
+        self.assertIn("ada:other", result)
+
+    def test_ada_dsc_tabular_dropdown_has_dsc_types(self):
+        """adaDSC tabular dropdown shows DSC types + generics."""
+        result = _get_profile_category_components("adaDSC", TABULAR_COMPONENT_TYPES)
+        self.assertIn("ada:DSCHeatTabular", result)
+        self.assertIn("ada:DSCResultsTabular", result)
+        self.assertIn("ada:other", result)
+        # Should NOT have types from other profiles
+        self.assertNotIn("ada:LAFProcessed", result)
+
+    def test_ada_sem_image_dropdown_has_sem_types(self):
+        """adaSEM image dropdown shows SEM image types + generics."""
+        result = _get_profile_category_components("adaSEM", IMAGE_COMPONENT_TYPES)
+        self.assertIn("ada:SEMImageCollection", result)
+        self.assertIn("ada:SEMImageMap", result)
+        self.assertIn("ada:SEMEBSDGrainImage", result)
+        self.assertIn("ada:SEMHRCLImage", result)
+        # Should NOT have other profile image types
+        self.assertNotIn("ada:AIVAImage", result)
+        self.assertNotIn("ada:EMPAImage", result)
+
+    def test_ada_product_full_lists(self):
+        """adaProduct gets all types + generics (no filtering)."""
+        result = _get_profile_category_components("adaProduct", IMAGE_COMPONENT_TYPES)
+        self.assertEqual(result, IMAGE_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES)
+
+    def test_unknown_profile_full_lists(self):
+        """Unknown profile gets all types + generics (no filtering)."""
+        result = _get_profile_category_components("unknownProfile", TABULAR_COMPONENT_TYPES)
+        self.assertEqual(result, TABULAR_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES)
+
+    def test_generics_always_appended(self):
+        """All profiles get GENERIC_COMPONENT_TYPES appended."""
+        for profile in ["adaDSC", "adaSEM", "adaLAF", "adaProduct"]:
+            result = _get_profile_category_components(profile, IMAGE_COMPONENT_TYPES)
+            for g in GENERIC_COMPONENT_TYPES:
+                self.assertIn(g, result, f"Missing {g} for {profile}")
+
+
+class InjectSchemaComponentTypeFilterTest(TestCase):
+    """Verify inject_schema_defaults filters componentType enums per profile."""
+
+    def test_tabular_enum_filtered_for_technique_profile(self):
+        """adaDSC _tabularComponentType enum contains DSC types but not LAF types."""
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA, profile_name="adaDSC")
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        enum = dist_props["_tabularComponentType"]["enum"]
+        self.assertIn("ada:DSCHeatTabular", enum)
+        self.assertIn("ada:DSCResultsTabular", enum)
+        self.assertNotIn("ada:LAFProcessed", enum)
+        # Generics present
+        self.assertIn("ada:other", enum)
+
+    def test_has_part_component_type_also_filtered(self):
+        """hasPart-level _tabularComponentType is also filtered."""
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA, profile_name="adaDSC")
+        hp_props = (
+            result["properties"]["schema:distribution"]["items"]["properties"]
+            ["schema:hasPart"]["items"]["properties"]
+        )
+        enum = hp_props["_tabularComponentType"]["enum"]
+        self.assertIn("ada:DSCHeatTabular", enum)
+        self.assertNotIn("ada:LAFProcessed", enum)
+
+    def test_ada_product_gets_full_enum(self):
+        """adaProduct _tabularComponentType contains all tabular types."""
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA, profile_name="adaProduct")
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        enum = dist_props["_tabularComponentType"]["enum"]
+        self.assertEqual(enum, TABULAR_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES)
+
+    def test_image_enum_empty_for_tabular_only_profile(self):
+        """adaDSC _imageComponentType has only generics (no DSC image types)."""
+        result = inject_schema_defaults(DISTRIBUTION_SCHEMA, profile_name="adaDSC")
+        dist_props = result["properties"]["schema:distribution"]["items"]["properties"]
+        enum = dist_props["_imageComponentType"]["enum"]
+        non_generic = [t for t in enum if t not in GENERIC_COMPONENT_TYPES]
+        self.assertEqual(non_generic, [])
+
+
+class BackwardCompatProfileMimeTest(TestCase):
+    """Backward compat: original 4 profiles produce equivalent MIME lists."""
+
+    def _mime_set(self, profile):
+        return set(_get_profile_mime_enum(profile))
+
+    def test_ada_empa_includes_image_tabular_document(self):
+        mimes = self._mime_set("adaEMPA")
+        self.assertTrue(set(IMAGE_MIMES).issubset(mimes))
+        self.assertTrue(set(TABULAR_MIMES).issubset(mimes))
+        self.assertTrue(set(DOCUMENT_MIMES).issubset(mimes))
+        self.assertIn("application/zip", mimes)
+        # EMPA has no datacube types
+        self.assertNotIn("application/x-hdf5", mimes)
+
+    def test_ada_xrd_includes_image_tabular_document(self):
+        mimes = self._mime_set("adaXRD")
+        self.assertTrue(set(IMAGE_MIMES).issubset(mimes))
+        self.assertTrue(set(TABULAR_MIMES).issubset(mimes))
+        self.assertTrue(set(DOCUMENT_MIMES).issubset(mimes))
+        # XRD has no datacube types
+        self.assertNotIn("application/x-hdf5", mimes)
+
+    def test_ada_icpms_includes_tabular_collection_document(self):
+        mimes = self._mime_set("adaICPMS")
+        self.assertTrue(set(TABULAR_MIMES).issubset(mimes))
+        self.assertTrue(set(DOCUMENT_MIMES).issubset(mimes))
+        self.assertIn("application/zip", mimes)
+        # ICPMS has no image types
+        self.assertNotIn("image/tiff", mimes)
+
+    def test_ada_vnmir_includes_tabular_image_datacube_document(self):
+        mimes = self._mime_set("adaVNMIR")
+        self.assertTrue(set(TABULAR_MIMES).issubset(mimes))
+        self.assertTrue(set(IMAGE_MIMES).issubset(mimes))
+        self.assertTrue(set(DATACUBE_MIMES).issubset(mimes))
+        self.assertTrue(set(DOCUMENT_MIMES).issubset(mimes))
+
+    def test_all_original_profiles_include_structured_data(self):
+        for profile in ["adaEMPA", "adaXRD", "adaICPMS", "adaVNMIR"]:
+            mimes = self._mime_set(profile)
+            for mime in STRUCTURED_DATA_MIMES:
+                self.assertIn(mime, mimes, f"Missing {mime} for {profile}")

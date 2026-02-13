@@ -133,6 +133,11 @@ IMAGE_COMPONENT_TYPES = [
     "ada:NanoIRMap", "ada:SEMEBSDGrainImageMap", "ada:SEMHRCLMap",
     "ada:SEMImageMap", "ada:NanoSIMSMap", "ada:XANESimage", "ada:VNMIROverviewImage",
     "ada:EMPAQEATabular", "ada:EMPAImageCollection",
+    # collection / multi-image types
+    "ada:EMPAImageMap", "ada:XRDIndexedImage", "ada:VNMIRSpectraPlot",
+    "ada:NanoSIMSImageCollection", "ada:XCTImageCollection",
+    "ada:AIVAImageCollection", "ada:UVFMImageCollection", "ada:VLMImageCollection",
+    "ada:SEMEDSElementalMaps", "ada:NanoIRMapCollection",
 ]
 
 # tabularData building block — shown when TABULAR_MIMES selected
@@ -161,6 +166,11 @@ TABULAR_COMPONENT_TYPES = [
     "ada:VNMIRSpectralPoint",
     "ada:XANESRawTabular", "ada:XANESProcessedTabular",
     "ada:XRDTabular",
+    # collection / multi-record tabular types
+    "ada:NanoIRPointCollection", "ada:NanoSIMSCollection",
+    "ada:LIT2DDataCollection", "ada:LITPolarDataCollection",
+    "ada:MCICPMSCollection", "ada:SEMEDSPointDataCollection",
+    "ada:SIMSCollection", "ada:ARGTCollection",
 ]
 
 # dataCube building block — shown when DATACUBE_MIMES selected
@@ -173,6 +183,11 @@ DATACUBE_COMPONENT_TYPES = [
     "ada:SEMEDSPointDataCube", "ada:SEMHRCLCube",
     "ada:STEMEDSCube", "ada:STEMEDSTomo", "ada:STEMEELSCube",
     "ada:VNMIRSpectralMap",
+    # additional datacube types
+    "ada:GCGCMSCollection", "ada:LCMSMSCollection",
+    "ada:TOFSIMSCollection", "ada:XANESCollection",
+    "ada:QRISCalibratedCollection", "ada:QRISRawCollection",
+    "ada:RITOFNGMSCollection",
 ]
 
 # document building block — shown when DOCUMENT_MIMES selected
@@ -183,6 +198,8 @@ DOCUMENT_COMPONENT_TYPES = [
     "ada:peaks", "ada:processingDescription",
     "ada:QRISCalibrationFile",
     "ada:samplePreparation", "ada:shapefiles",
+    # additional document types
+    "ada:SLSShapeModel", "ada:SLSPartialScan", "ada:MCICPMSRaw",
 ]
 
 # Generic types available in every category dropdown
@@ -191,6 +208,95 @@ GENERIC_COMPONENT_TYPES = [
     "ada:areaOfInterest", "ada:instrumentMetadata", "ada:other",
     "ada:plot", "ada:quickLook", "ada:report", "ada:visImage",
 ]
+
+# ---------------------------------------------------------------------------
+# Per-profile component type mapping
+#
+# Maps each technique profile → its allowed ada: component types (excluding
+# GENERIC_COMPONENT_TYPES which are always appended).  MIME filtering and
+# componentType dropdown filtering are both derived from this dict.
+# ---------------------------------------------------------------------------
+
+PROFILE_COMPONENT_TYPES = {
+    # --- Original 4 profiles (from schema.yaml hasPart enum) ---
+    "adaEMPA": [
+        "ada:EMPAImageMap", "ada:EMPAImage",
+        "ada:EMPAQEATabular", "ada:EMPAImageCollection",
+    ],
+    "adaXRD": [
+        "ada:XRDTabular", "ada:XRDDiffractionPattern", "ada:XRDIndexedImage",
+    ],
+    "adaICPMS": [
+        "ada:HRICPMSProcessed", "ada:HRICPMSRaw",
+        "ada:QICPMSProcessedTabular", "ada:QICPMSRawTabular",
+        "ada:MCICPMSTabular", "ada:MCICPMSCollection", "ada:MCICPMSRaw",
+    ],
+    "adaVNMIR": [
+        "ada:VNMIRSpectralPoint", "ada:VNMIROverviewImage",
+        "ada:VNMIRSpectralMap", "ada:VNMIRSpectraPlot",
+    ],
+    # --- 31 generated profiles (from generate_profiles.py PROFILES) ---
+    "adaARGT": ["ada:ARGTDocument", "ada:ARGTCollection", "ada:calibrationFile"],
+    "adaDSC": ["ada:DSCHeatTabular", "ada:DSCResultsTabular"],
+    "adaEAIRMS": ["ada:EAIRMSCollection"],
+    "adaICPOES": [
+        "ada:ICPOESIntermediateTabular", "ada:ICPOESProcessedTabular",
+        "ada:ICPOESRawTabular",
+    ],
+    "adaL2MS": ["ada:L2MSCube", "ada:L2MSOverviewImage"],
+    "adaLAF": ["ada:LAFProcessed", "ada:LAFRaw"],
+    "adaNanoIR": [
+        "ada:NanoIRBackground", "ada:NanoIRMap",
+        "ada:NanoIRMapCollection", "ada:NanoIRPointCollection",
+    ],
+    "adaNanoSIMS": [
+        "ada:NanoSIMSCollection", "ada:NanoSIMSImageCollection",
+        "ada:NanoSIMSTabular", "ada:NanoSIMSMap", "ada:NanoSIMSImage",
+    ],
+    "adaPSFD": ["ada:PSFDTabular"],
+    "adaQRIS": [
+        "ada:QRISCalibratedCollection", "ada:QRISRawCollection",
+        "ada:QRISCalibrationFile",
+    ],
+    "adaSLS": ["ada:SLSShapeModel", "ada:SLSPartialScan", "ada:ShapeModelImage"],
+    "adaXCT": ["ada:XCTImageCollection"],
+    "adaAIVA": ["ada:AIVAImage", "ada:AIVAImageCollection"],
+    "adaAMS": ["ada:AMSRawData", "ada:AMSProcessedData"],
+    "adaFTICRMS": ["ada:FTICRMSTabular", "ada:FTICRMSCube"],
+    "adaGCMS": ["ada:GCMSCollection", "ada:GCMSCube", "ada:GCGCMSCollection"],
+    "adaGPYC": ["ada:GPYCProcessedTabular", "ada:GPYCRawTabular"],
+    "adaIC": ["ada:ICTabular"],
+    "adaLCMS": ["ada:LCMSCollection", "ada:LCMSMSCollection"],
+    "adaLIT": ["ada:LITImage", "ada:LIT2DDataCollection", "ada:LITPolarDataCollection"],
+    "adaNGNSMS": ["ada:NGNSMSRaw", "ada:NGNSMSProcessed"],
+    "adaRAMAN": ["ada:RAMANRawTabular"],
+    "adaRITOFNGMS": ["ada:RITOFNGMSTabular", "ada:RITOFNGMSCollection"],
+    "adaSEM": [
+        "ada:SEMImageCollection", "ada:SEMImageMap",
+        "ada:SEMEBSDGrainImage", "ada:SEMEBSDGrainImageMap",
+        "ada:SEMEBSDGrainImageMapCube",
+        "ada:SEMEDSElementalMap", "ada:SEMEDSElementalMaps",
+        "ada:SEMEDSElementalMapsCube",
+        "ada:SEMEDSPointData", "ada:SEMEDSPointDataCollection",
+        "ada:SEMEDSPointDataCube",
+        "ada:SEMHRCLImage", "ada:SEMHRCLMap", "ada:SEMHRCLCube",
+    ],
+    "adaSIMS": ["ada:SIMSTabular", "ada:SIMSCollection"],
+    "adaSVRUEC": ["ada:SVRUECTabular"],
+    "adaTEM": [
+        "ada:TEMImage", "ada:TEMPatternsImage", "ada:TEMEDSImageCollection",
+        "ada:STEMImage", "ada:STEMEDSTabular", "ada:STEMEDSCube",
+        "ada:STEMEDSTomo", "ada:STEMEELSTabular", "ada:STEMEELSCube",
+    ],
+    "adaToFSIMS": ["ada:TOFSIMSCollection"],
+    "adaUVFM": ["ada:UVFMImage", "ada:UVFMImageCollection"],
+    "adaVLM": ["ada:VLMImage", "ada:VLMImageCollection"],
+    "adaXANES": [
+        "ada:XANESImageStack", "ada:XANESStackOverviewImage",
+        "ada:XANESRawTabular", "ada:XANESProcessedTabular",
+        "ada:XANESimage", "ada:XANESCollection",
+    ],
+}
 
 # ---------------------------------------------------------------------------
 # Per-profile measurement detail controls
@@ -323,40 +429,69 @@ FILE_TYPE_TO_MIMES = {
     "otherFileType": MODEL_MIMES + VIDEO_MIMES,
 }
 
-# Profile → supported file types (which drive the MIME dropdown options)
-# adaProduct supports all file types; technique profiles support subsets.
-PROFILE_FILE_TYPES = {
-    "adaProduct": "all",
-    "adaEMPA": ["imageMap", "image", "tabularData", "collection", "supDocImage", "document"],
-    "adaXRD": ["tabularData", "image", "document"],
-    "adaICPMS": ["tabularData", "collection", "document"],
-    "adaVNMIR": ["tabularData", "imageMap", "dataCube", "supDocImage", "document"],
-}
+def _get_profile_category_components(profile_name, global_category_list):
+    """Return componentType enum filtered by profile for a MIME category.
+
+    Intersects the global category list with the profile's allowed types.
+    Always appends GENERIC_COMPONENT_TYPES.
+    Returns full category + generics for adaProduct/unknown profiles.
+    """
+    profile_types = PROFILE_COMPONENT_TYPES.get(profile_name)
+    if profile_types is None:
+        # adaProduct or unknown -> no filtering
+        return global_category_list + GENERIC_COMPONENT_TYPES
+
+    profile_set = set(profile_types)
+    filtered = [t for t in global_category_list if t in profile_set]
+    return filtered + GENERIC_COMPONENT_TYPES
+
+
+def _derive_profile_mime_categories(profile_name):
+    """Derive supported MIME categories from the profile's component types.
+
+    Returns a set of FILE_TYPE_TO_MIMES keys, or None for no filtering.
+    """
+    profile_types = PROFILE_COMPONENT_TYPES.get(profile_name)
+    if profile_types is None:
+        return None  # No filtering (adaProduct / unknown)
+
+    profile_set = set(profile_types)
+    categories = set()
+
+    if profile_set & set(IMAGE_COMPONENT_TYPES):
+        categories.update(["image", "imageMap", "supDocImage"])
+    if profile_set & set(TABULAR_COMPONENT_TYPES):
+        categories.add("tabularData")
+    if profile_set & set(DATACUBE_COMPONENT_TYPES):
+        categories.add("dataCube")
+
+    # Always include document and collection for all technique profiles
+    categories.add("document")
+    categories.add("collection")
+
+    return categories
 
 
 def _get_profile_mime_enum(profile_name):
-    """Return the filtered MIME enum for a profile, or full list if unknown.
+    """Return filtered MIME enum for a profile, derived from PROFILE_COMPONENT_TYPES.
 
     adaProduct and unknown/unset profiles get the complete MIME list.
-    Technique profiles get a filtered list based on their supported file types,
-    plus structured data formats (JSON, XML, YAML) always included.
+    Technique profiles get a filtered list based on which MIME categories
+    their component types fall into, plus structured data formats always included.
     """
-    if not profile_name or profile_name not in PROFILE_FILE_TYPES:
+    if not profile_name or profile_name == "adaProduct":
         return MIME_TYPE_ENUM
 
-    file_types = PROFILE_FILE_TYPES[profile_name]
-
-    # "all" sentinel means no filtering
-    if file_types == "all":
+    categories = _derive_profile_mime_categories(profile_name)
+    if categories is None:
         return MIME_TYPE_ENUM
 
     allowed = set()
-    for ft in file_types:
-        allowed.update(FILE_TYPE_TO_MIMES.get(ft, []))
-    # Always include structured data formats (JSON, XML, YAML) for all profiles
+    for cat in categories:
+        allowed.update(FILE_TYPE_TO_MIMES.get(cat, []))
+    # Always include structured data formats (JSON, XML, YAML)
     allowed.update(STRUCTURED_DATA_MIMES)
 
-    # Return in the same order as the master list
     return [m for m in MIME_TYPE_ENUM if m in allowed]
 
 
@@ -1399,10 +1534,14 @@ def inject_schema_defaults(schema, profile_name=None):
         # instead of the full ~110-item list.
         if _is_ada_profile(profile_name):
             _CT_CATEGORIES = {
-                "_imageComponentType": IMAGE_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
-                "_tabularComponentType": TABULAR_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
-                "_dataCubeComponentType": DATACUBE_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
-                "_documentComponentType": DOCUMENT_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
+                "_imageComponentType": _get_profile_category_components(
+                    profile_name, IMAGE_COMPONENT_TYPES),
+                "_tabularComponentType": _get_profile_category_components(
+                    profile_name, TABULAR_COMPONENT_TYPES),
+                "_dataCubeComponentType": _get_profile_category_components(
+                    profile_name, DATACUBE_COMPONENT_TYPES),
+                "_documentComponentType": _get_profile_category_components(
+                    profile_name, DOCUMENT_COMPONENT_TYPES),
             }
             for props_container in [dist_props, hp_props]:
                 if props_container:

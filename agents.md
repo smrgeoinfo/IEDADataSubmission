@@ -254,7 +254,7 @@ The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json
 ```
 
-**Seven profiles**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (ADA technique profiles), `CDIFDiscovery`, `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
+**38 profiles**: `adaProduct` (base) + 35 technique-specific ADA profiles (original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`; plus 31 generated profiles), `CDIFDiscovery`, `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets. Each technique profile has per-profile MIME filtering and componentType dropdown filtering derived from `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
 
 **Key files**:
 - `OCGbuildingBlockTest/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
@@ -282,10 +282,11 @@ To add a new technique profile (e.g., `adaXRF`):
 2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `OCGbuildingBlockTest` directory.
 3. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
 4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
-5. **Measurement details** *(optional)* — If the technique has a dedicated detail building block (e.g., `detailXRF/`) with measurement properties, add an entry to `PROFILE_MEASUREMENT_CONTROLS` in `dspback-django/records/uischema_injection.py`. Use the `_ct_ctrl(prop, label)` helper for controls. The measurement group is automatically inserted after each ComponentType dropdown in the form.
-6. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
-7. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
-8. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
+5. **MIME / componentType filtering** — Add an entry to `PROFILE_COMPONENT_TYPES` in `dspback-django/records/uischema_injection.py` listing the profile's `ada:`-prefixed component types. MIME type filtering and componentType dropdown filtering are both auto-derived from this dict. Also add any new component types to the appropriate global category list (`IMAGE_COMPONENT_TYPES`, `TABULAR_COMPONENT_TYPES`, `DATACUBE_COMPONENT_TYPES`, `DOCUMENT_COMPONENT_TYPES`).
+6. **Measurement details** *(optional)* — If the technique has a dedicated detail building block (e.g., `detailXRF/`) with measurement properties, add an entry to `PROFILE_MEASUREMENT_CONTROLS` in `dspback-django/records/uischema_injection.py`. Use the `_ct_ctrl(prop, label)` helper for controls. The measurement group is automatically inserted after each ComponentType dropdown in the form.
+7. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
+8. **Frontend form title** — Add `adaXRF: 'ADA XRF Product Metadata'` to the `profileNames` map in `dspfront/src/components/metadata/geodat.ada-profile-form.vue`.
+9. **i18n strings** — Add the profile entry under `metadata.ada.profiles` in `dspfront/src/i18n/messages.ts`.
 
 ### Adding a New CDIF Profile
 
@@ -330,8 +331,8 @@ The Django catalog backend provides generic Profile and Record management. Profi
 | `dspback-django/records/views.py` | ProfileViewSet (lookup by name), RecordViewSet (CRUD + jsonld/import actions, `?mine=true` owner filter), persons_search, organizations_search |
 | `dspback-django/records/validators.py` | JSON Schema validation (auto-detects Draft-07 vs Draft-2020-12) |
 | `dspback-django/records/services.py` | extract_indexed_fields(), extract_known_entities(), upsert_known_entities(), fetch_jsonld_from_url() |
-| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, technique-specific measurement detail groups (VNMIR/EMPA/XRD), MIME type enum on encodingFormat; schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM |
-| `dspback-django/records/tests.py` | 130 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, serializer data cleanup, hasPart groups |
+| `dspback-django/records/uischema_injection.py` | UISchema tree walker: injects CzForm vocabulary configs on person/org controls, variable panel with advanced toggle (SHOW rule), distribution detail with type selector + WebAPI fields + archive conditional, technique-specific measurement detail groups (VNMIR/EMPA/XRD), MIME type enum on encodingFormat, per-profile MIME filtering and componentType dropdown filtering (both derived from `PROFILE_COMPONENT_TYPES`); schema defaults injection for _showAdvanced, _distributionType, WebAPI properties, MIME_TYPE_ENUM, per-category componentType enums |
+| `dspback-django/records/tests.py` | 171 tests covering entity extraction, upsert, search API, vocabulary injection, variable panel layout, advanced toggle rule, distribution detail, MIME type options, per-profile MIME filtering, componentType dropdown filtering, serializer data cleanup, hasPart groups |
 | `dspback-django/ada_bridge/tests.py` | 74 tests: translator unit tests (62, SQLite), push/sync/status integration tests (12, PostgreSQL) |
 | `dspback-django/records/management/commands/load_profiles.py` | Loads profiles from OGC BB build output, sets parent relationships |
 | `dspback-django/records/management/commands/backfill_entities.py` | Populates KnownPerson/KnownOrganization from all existing records |
@@ -418,6 +419,16 @@ Schema injection adds `_distributionType` enum, `schema:serviceType`, and `schem
 
 26 MIME types from the `adaFileExtensions` lookup table are hardcoded in `MIME_TYPE_OPTIONS` (sorted alphabetically by media type). Each entry has `{"const": media_type, "title": ".ext - Type Name (media_type)"}` format. `MIME_TYPE_ENUM` is a flat list of media type strings derived from `MIME_TYPE_OPTIONS`. CzForm does NOT support `oneOf` on primitive string items (causes "No applicable renderer found"), so `enum` is used instead. Injected on `encodingFormat.items` for both distribution and hasPart items.
 
+### Per-Profile MIME and componentType Filtering
+
+Technique profiles show only MIME types and componentType values relevant to their technique. The single source of truth is `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`, which maps each of the 35 technique profiles to its allowed `ada:`-prefixed component types.
+
+**MIME filtering** (`_get_profile_mime_enum()`): derives which MIME categories (image, tabular, dataCube) the profile needs by checking if its component types intersect the global category lists. Document and collection/ZIP are always included. Structured data formats (JSON, XML, YAML) are always included. `adaProduct` and unknown profiles get the full MIME list.
+
+**componentType dropdown filtering** (`_get_profile_category_components()`): for each MIME category (Image Details, Tabular Data Details, etc.), intersects the global category list with the profile's allowed types, then appends `GENERIC_COMPONENT_TYPES` (always available: analysisLocation, contextPhotography, plot, quickLook, etc.). `adaProduct` gets full unfiltered lists.
+
+Both filters are applied in `inject_schema_defaults()` at serve time. No frontend changes are needed — filtering is server-side in the schema injection.
+
 ### CDIF Profile Schema Notes
 
 The CDIF Discovery profile schema is built from OGC Building Block source schemas under `OCGbuildingBlockTest/_sources/`. Key authoring pitfalls:
@@ -450,7 +461,7 @@ ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail pr
 | adaICPMS | *(none)* | No dedicated detail schema |
 | adaProduct | *(none)* | Generic profile — no measurement details |
 
-To add measurement details for a new technique profile, add an entry to `PROFILE_MEASUREMENT_CONTROLS` with the profile name, group label, and control elements. The `_ct_ctrl(prop, label)` helper generates controls scoped to `#/properties/fileDetail/properties/componentType/properties/{prop}`.
+To add measurement details for a new technique profile, add an entry to `PROFILE_MEASUREMENT_CONTROLS` with the profile name, group label, and control elements. The `_ct_ctrl(prop, label)` helper generates controls scoped to `#/properties/componentType/properties/{prop}` (flat — no `fileDetail` wrapper).
 
 ## ADA Bridge (ada_bridge app)
 

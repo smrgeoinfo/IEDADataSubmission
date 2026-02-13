@@ -81,10 +81,11 @@ For **ADA technique profiles**, add an entry to `PROFILES` in `generate_profiles
 3. Add to `TERMCODE_TO_PROFILE` in `update_conformsto.py`, `validate_instance.py`, and `yaml_to_jsonld.py`
 4. Add to `ADA_PROFILES` in `convert_for_jsonforms.py`
 5. Add to `KNOWN_PROFILES` in `validate_instance.py`
-6. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/` (if UI form needed)
-7. Add `profileNames` entry in `geodat.ada-profile-form.vue` (if UI form needed)
-8. Add i18n strings in `messages.ts` (if UI form needed)
-9. `docker exec catalog python manage.py load_profiles`
+6. Add entry to `PROFILE_COMPONENT_TYPES` in `uischema_injection.py` (MIME filtering and componentType dropdowns are auto-derived from this dict)
+7. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/` (if UI form needed)
+8. Add `profileNames` entry in `geodat.ada-profile-form.vue` (if UI form needed)
+9. Add i18n strings in `messages.ts` (if UI form needed)
+10. `docker exec catalog python manage.py load_profiles`
 
 For **CDIF profiles**, see `agents.md` > "Adding a New CDIF Profile".
 
@@ -96,6 +97,15 @@ For **CDIF profiles**, see `agents.md` > "Adding a New CDIF Profile".
 - UISchema scopes must include `schema:` prefix: `#/properties/schema:name` not `#/properties/name`
 - Frontend profile selection auto-discovers CDIF profiles (names starting with `CDIF`, excluding `CDIFDiscovery`)
 - ADA technique profiles need `base_profile` FK set via `PARENT_PROFILES` in `load_profiles.py`
+
+## Per-Profile MIME and componentType Filtering
+
+Technique profiles show only the MIME types and componentType dropdown values relevant to their technique. All filtering is driven by a single dict `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`.
+
+- **`PROFILE_COMPONENT_TYPES`**: Maps each of the 35 technique profiles to its allowed `ada:`-prefixed component types. `adaProduct` and unknown profiles are absent → no filtering (full lists).
+- **MIME filtering**: `_derive_profile_mime_categories()` checks which global category lists (IMAGE, TABULAR, DATACUBE, DOCUMENT) the profile's types intersect. Document and collection (ZIP) categories are always included. `_get_profile_mime_enum()` returns the filtered MIME list.
+- **componentType dropdowns**: `_get_profile_category_components()` intersects the profile's types with each per-category global list, then appends `GENERIC_COMPONENT_TYPES` (always available). Called from `inject_schema_defaults()` when building `_CT_CATEGORIES`.
+- **Adding a new profile**: Add entry to `PROFILE_COMPONENT_TYPES` — MIME filtering and componentType dropdowns are auto-derived.
 
 ## Technique-Specific Measurement Details
 
