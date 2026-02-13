@@ -106,6 +106,16 @@ ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail pr
 - **adaProduct/adaICPMS/CDIF**: No measurement detail groups injected (not in `PROFILE_MEASUREMENT_CONTROLS`)
 - To add measurement details for a new technique, add an entry to `PROFILE_MEASUREMENT_CONTROLS` using `_ct_ctrl(prop, label)` helper
 
+## File Detail Properties (Flat Structure)
+
+File-type-specific properties (`componentType`, `cdi:hasPhysicalMapping`, CSV metadata, etc.) live directly on distribution and hasPart items — there is no `fileDetail` wrapper object.
+
+- **Schema**: `files/schema.yaml` uses `allOf` with file-type `anyOf` at the top level; `convert_for_jsonforms.py` merges these into flat properties on hasPart items
+- **UISchema**: `uischema_injection.py` scopes use `#/properties/{prop}` (via `_fd_ctrl`) and `#/properties/componentType/properties/{prop}` (via `_ct_ctrl`) — no `fileDetail` path segment
+- **Serializer**: `serializers.py` runs `_consolidate_component_type()`, `_clean_physical_mapping_items()`, and `_merge_inferred_file_types()` directly on dist/part items
+- **Frontend load/save**: `catalog.ts` unwraps/wraps `cdi:formats_InstanceVariable` and populates per-category componentType UI properties directly on dist/part items
+- **Bundle wizard**: `MetadataFormStep.vue` assigns CSV metadata and `cdi:hasPhysicalMapping` directly to hasPart items
+
 ## Distribution Schema Flattening
 
 The `schema:distribution` schema is `type: array` in the canonical JSON-LD but the uischema scopes into it as an object (archive info + hasPart file list as separate groups). Both `MetadataFormStep.vue` (bundle wizard) and `geodat.ada-profile-form.vue` (profile form) flatten the schema at load time:
