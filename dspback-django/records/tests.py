@@ -1129,6 +1129,17 @@ class DistributionInjectionTest(TestCase):
         dist_ctrl = result["elements"][6]["elements"][0]
         self.assertEqual(dist_ctrl["options"]["elementLabelProp"], "schema:name")
 
+    def _extract_mime_values_from_rule(self, rule):
+        """Extract MIME values from flat OR rule structure.
+
+        Rule is OR of individual {scope, schema: {const: mime}} conditions.
+        Same pattern used at both distribution and hasPart levels.
+        """
+        return [
+            cond["schema"]["const"]
+            for cond in rule["condition"]["conditions"]
+        ]
+
     def test_image_detail_group(self):
         detail = self._get_distribution_detail()
         image_group = detail["elements"][6]
@@ -1136,32 +1147,31 @@ class DistributionInjectionTest(TestCase):
         self.assertEqual(image_group["label"], "Image Details")
         rule = image_group["rule"]
         self.assertEqual(rule["effect"], "SHOW")
-        self.assertEqual(rule["condition"]["type"], "AND")
-        # MIME condition uses enum of image types
-        mime_cond = rule["condition"]["conditions"][1]
-        self.assertEqual(mime_cond["scope"], "#/properties/schema:encodingFormat")
-        self.assertIn("image/tiff", mime_cond["schema"]["enum"])
+        # Flat OR of const conditions (CzForm can't handle any compound nesting)
+        self.assertEqual(rule["condition"]["type"], "OR")
+        mime_values = self._extract_mime_values_from_rule(rule)
+        self.assertIn("image/tiff", mime_values)
 
     def test_tabular_detail_group(self):
         detail = self._get_distribution_detail()
         tabular_group = detail["elements"][7]
         self.assertEqual(tabular_group["label"], "Tabular Data Details")
-        mime_cond = tabular_group["rule"]["condition"]["conditions"][1]
-        self.assertIn("text/csv", mime_cond["schema"]["enum"])
+        mime_values = self._extract_mime_values_from_rule(tabular_group["rule"])
+        self.assertIn("text/csv", mime_values)
 
     def test_datacube_detail_group(self):
         detail = self._get_distribution_detail()
         cube_group = detail["elements"][8]
         self.assertEqual(cube_group["label"], "Data Cube Details")
-        mime_cond = cube_group["rule"]["condition"]["conditions"][1]
-        self.assertIn("application/x-hdf5", mime_cond["schema"]["enum"])
+        mime_values = self._extract_mime_values_from_rule(cube_group["rule"])
+        self.assertIn("application/x-hdf5", mime_values)
 
     def test_document_detail_group(self):
         detail = self._get_distribution_detail()
         doc_group = detail["elements"][9]
         self.assertEqual(doc_group["label"], "Document Details")
-        mime_cond = doc_group["rule"]["condition"]["conditions"][1]
-        self.assertIn("application/pdf", mime_cond["schema"]["enum"])
+        mime_values = self._extract_mime_values_from_rule(doc_group["rule"])
+        self.assertIn("application/pdf", mime_values)
 
     def test_file_detail_groups_use_flat_scope(self):
         """File-type groups reference file detail properties with flat scope."""
@@ -2135,3 +2145,160 @@ class BackwardCompatProfileMimeTest(TestCase):
             mimes = self._mime_set(profile)
             for mime in STRUCTURED_DATA_MIMES:
                 self.assertIn(mime, mimes, f"Missing {mime} for {profile}")
+
+
+# ---------------------------------------------------------------------------
+# Profile detection tests
+# ---------------------------------------------------------------------------
+
+from records.profile_detection import detect_profile
+
+
+class ProfileDetectionTest(TestCase):
+    """Tests for the detect_profile() utility and the detect-profile API endpoint."""
+
+    def test_conformsto_detection(self):
+        """conformsTo URI should be the highest-priority detection method."""
+        jsonld = {
+            "schema:subjectOf": {
+                "dcterms:conformsTo": [
+                    {"@id": "ada:profile/adaSEM"}
+                ]
+            }
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaSEM")
+        self.assertEqual(result["source"], "conformsTo")
+
+    def test_conformsto_full_url(self):
+        """Full URL conformsTo should also be detected."""
+        jsonld = {
+            "schema:subjectOf": {
+                "dcterms:conformsTo": [
+                    {"@id": "https://ada.astromat.org/metadata/profile/adaEMPA"}
+                ]
+            }
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaEMPA")
+        self.assertEqual(result["source"], "conformsTo")
+
+    def test_conformsto_string_entry(self):
+        """conformsTo may be a bare string instead of an object."""
+        jsonld = {
+            "schema:subjectOf": {
+                "dcterms:conformsTo": "ada:profile/adaXRD"
+            }
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaXRD")
+        self.assertEqual(result["source"], "conformsTo")
+
+    def test_additional_type_ada_prefix(self):
+        """ada:-prefixed product types should detect the correct profile."""
+        jsonld = {
+            "schema:additionalType": ["ada:DataDeliveryPackage", "ada:EMPAImage"]
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaEMPA")
+        self.assertEqual(result["source"], "additionalType")
+
+    def test_additional_type_human_readable_label(self):
+        """Human-readable technique labels should detect the correct profile."""
+        jsonld = {
+            "schema:additionalType": ["Scanning electron microscopy"]
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaSEM")
+        self.assertEqual(result["source"], "additionalType")
+
+    def test_termcode_fallback(self):
+        """termCode should be detected when conformsTo and additionalType don't match."""
+        jsonld = {
+            "schema:measurementTechnique": {
+                "schema:termCode": "XRD"
+            }
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaXRD")
+        self.assertEqual(result["source"], "termCode")
+
+    def test_no_match_returns_none(self):
+        """Empty/unrecognized JSON-LD should return profile: None."""
+        result = detect_profile({})
+        self.assertIsNone(result["profile"])
+        self.assertIsNone(result["source"])
+
+    def test_priority_conformsto_over_additional_type(self):
+        """conformsTo should take priority over additionalType."""
+        jsonld = {
+            "schema:subjectOf": {
+                "dcterms:conformsTo": [
+                    {"@id": "ada:profile/adaSEM"}
+                ]
+            },
+            "schema:additionalType": ["ada:EMPAImage"],
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaSEM")
+        self.assertEqual(result["source"], "conformsTo")
+
+    def test_priority_additional_type_over_termcode(self):
+        """additionalType should take priority over termCode."""
+        jsonld = {
+            "schema:additionalType": ["ada:SEMImageCollection"],
+            "schema:measurementTechnique": {
+                "schema:termCode": "XRD"
+            }
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaSEM")
+        self.assertEqual(result["source"], "additionalType")
+
+    def test_additional_type_string_not_list(self):
+        """additionalType may be a string instead of a list."""
+        jsonld = {
+            "schema:additionalType": "ada:VNMIRSpectralPoint"
+        }
+        result = detect_profile(jsonld)
+        self.assertEqual(result["profile"], "adaVNMIR")
+        self.assertEqual(result["source"], "additionalType")
+
+    def test_api_endpoint(self):
+        """POST /api/catalog/detect-profile/ should return detected profile."""
+        Profile.objects.create(name="adaSEM")
+        client = APIClient()
+        resp = client.post(
+            "/api/catalog/detect-profile/",
+            data={
+                "jsonld": {
+                    "schema:additionalType": ["ada:SEMImageCollection"]
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.data["profile"], "adaSEM")
+        self.assertEqual(resp.data["source"], "additionalType")
+
+    def test_api_endpoint_no_jsonld(self):
+        """Missing jsonld field should return 400."""
+        client = APIClient()
+        resp = client.post("/api/catalog/detect-profile/", data={}, format="json")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_api_endpoint_profile_not_in_db(self):
+        """Detected profile that doesn't exist in DB should return None."""
+        # Don't create the profile in DB
+        client = APIClient()
+        resp = client.post(
+            "/api/catalog/detect-profile/",
+            data={
+                "jsonld": {
+                    "schema:additionalType": ["ada:SEMImageCollection"]
+                }
+            },
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertIsNone(resp.data["profile"])

@@ -103,9 +103,10 @@ For **CDIF profiles**, see `agents.md` > "Adding a New CDIF Profile".
 Technique profiles show only the MIME types and componentType dropdown values relevant to their technique. All filtering is driven by a single dict `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`.
 
 - **`PROFILE_COMPONENT_TYPES`**: Maps each of the 35 technique profiles to its allowed `ada:`-prefixed component types. `adaProduct` and unknown profiles are absent → no filtering (full lists).
-- **MIME filtering**: `_derive_profile_mime_categories()` checks which global category lists (IMAGE, TABULAR, DATACUBE, DOCUMENT) the profile's types intersect. Document and collection (ZIP) categories are always included. `_get_profile_mime_enum()` returns the filtered MIME list.
+- **MIME filtering (hasPart level)**: `_derive_profile_mime_categories()` checks which global category lists (IMAGE, TABULAR, DATACUBE, DOCUMENT) the profile's types intersect. Document and collection (ZIP) categories are always included. `_get_profile_mime_enum()` returns the filtered MIME list.
+- **MIME filtering (distribution level)**: `PROFILE_DIST_MIME_CATEGORIES` maps profiles to restricted MIME categories for the top-level distribution (e.g., `adaL2MS` → dataCube only). `_get_dist_mime_enum()` returns archive + primary data + structured data MIMEs. Profiles not in this dict fall back to `_get_profile_mime_enum()`.
 - **componentType dropdowns**: `_get_profile_category_components()` intersects the profile's types with each per-category global list, then appends `GENERIC_COMPONENT_TYPES` (always available). Called from `inject_schema_defaults()` when building `_CT_CATEGORIES`.
-- **Adding a new profile**: Add entry to `PROFILE_COMPONENT_TYPES` — MIME filtering and componentType dropdowns are auto-derived.
+- **Adding a new profile**: Add entry to `PROFILE_COMPONENT_TYPES` — MIME filtering and componentType dropdowns are auto-derived. Optionally add to `PROFILE_DIST_MIME_CATEGORIES` if the distribution-level MIME list should be narrower than the hasPart list.
 
 ## Technique-Specific Measurement Details
 
@@ -136,13 +137,46 @@ The `schema:distribution` schema is `type: array` in the canonical JSON-LD but t
 
 This is required because `uischema_injection.py` also converts `encodingFormat` from array to string (with MIME enum) so that SHOW rule conditions (`{"const": "text/csv"}`) work against simple string values.
 
+### Two uischema injection paths for distribution
+
+The stored uischema determines which injection path runs:
+
+- **Array-style** (`#/properties/schema:distribution` scope): `_walk()` injects `DISTRIBUTION_DETAIL` as the array control's detail layout. File-type groups (Image, Tabular, Data Cube, Document) live inside this detail with `_mime_and_download_rule()` SHOW rules using relative scopes (`#/properties/schema:encodingFormat`).
+- **Flattened-style** (scopes like `#/properties/schema:distribution/properties/schema:name`): The stored uischema has separate Archive + Distribution (Files) groups. `_walk()` detects the `Category label="Distribution"` and calls `_inject_dist_file_detail_groups()` which: (a) adds a zip-only SHOW rule on the hasPart group, (b) appends `DIST_*_DETAIL_GROUP` constants with full-path scopes (`#/properties/schema:distribution/properties/...`). The `inject_schema_defaults()` function copies file-detail properties (physical mapping, image channels, CSV metadata, etc.) from hasPart items to `dist_props` so CzForm can render the distribution-level controls.
+
+ADA technique profiles currently use the **flattened-style** (inherited from adaProduct's stored uischema).
+
 ## CzForm Rule Conditions
 
-CzForm (cznet-vue-core) does NOT reliably support `enum` in rule conditions. Use OR with individual `{"const": value}` conditions instead:
+CzForm (cznet-vue-core) has strict limitations on rule condition complexity:
+
+1. **No `enum` in conditions** — `{"schema": {"enum": [...]}}` does not reliably fire. Use OR with individual `{"const": value}` conditions instead.
+2. **No nested compound conditions** — CzForm cannot evaluate AND wrapping OR, OR wrapping AND, or any deeper nesting. Only **flat** compound conditions work (AND of simple conditions, OR of simple conditions).
+3. **Working patterns:**
+   - Single condition: `{"scope": "...", "schema": {"const": "value"}}`
+   - Flat OR: `{"type": "OR", "conditions": [{simple}, {simple}, ...]}`
+   - Flat AND: `{"type": "AND", "conditions": [{simple}, {simple}]}`
+4. **Non-working patterns:**
+   - `{"type": "AND", "conditions": [{simple}, {"type": "OR", ...}]}` — nested OR inside AND
+   - `{"type": "OR", "conditions": [{"type": "AND", ...}, ...]}` — nested AND inside OR
+   - `{"schema": {"enum": [...]}}` — enum in condition
+
+If you need AND + multi-value matching (e.g., distributionType == X AND mime in [a, b, c]), you **cannot** express this in a single rule. Either drop one guard (if safe) or restructure the UI to avoid the need.
+
 ```json
+// GOOD: flat OR of simple conditions
 {"type": "OR", "conditions": [
   {"scope": "#/properties/field", "schema": {"const": "value1"}},
   {"scope": "#/properties/field", "schema": {"const": "value2"}}
+]}
+
+// BAD: nested compound
+{"type": "AND", "conditions": [
+  {"scope": "#/properties/a", "schema": {"const": "x"}},
+  {"type": "OR", "conditions": [
+    {"scope": "#/properties/b", "schema": {"const": "y"}},
+    {"scope": "#/properties/b", "schema": {"const": "z"}}
+  ]}
 ]}
 ```
 

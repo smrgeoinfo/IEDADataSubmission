@@ -495,23 +495,94 @@ def _get_profile_mime_enum(profile_name):
     return [m for m in MIME_TYPE_ENUM if m in allowed]
 
 
+# ---------------------------------------------------------------------------
+# Per-profile distribution-level MIME filtering
+# ---------------------------------------------------------------------------
+
+# Maps profile → MIME categories allowed at the *distribution* level (archive + primary data).
+# Profiles absent from this dict use the full hasPart-level MIME list.
+# "collection" (zip) and STRUCTURED_DATA_MIMES are always added.
+PROFILE_DIST_MIME_CATEGORIES = {
+    "adaL2MS": {"dataCube"},
+}
+
+
+def _get_dist_mime_enum(profile_name):
+    """Return MIME enum for the distribution level (archive + primary data).
+
+    Profiles in PROFILE_DIST_MIME_CATEGORIES get a restricted list;
+    others fall back to _get_profile_mime_enum().
+    """
+    cats = PROFILE_DIST_MIME_CATEGORIES.get(profile_name)
+    if cats is None:
+        return _get_profile_mime_enum(profile_name)
+
+    allowed = set()
+    for cat in cats:
+        allowed.update(FILE_TYPE_TO_MIMES.get(cat, []))
+    allowed.update(ARCHIVE_MIMES)
+    allowed.update(STRUCTURED_DATA_MIMES)
+    return [m for m in MIME_TYPE_ENUM if m in allowed]
+
+
 def _mime_and_download_rule(mime_list):
-    """Build an AND rule: _distributionType == 'Data Download' AND encodingFormat in mime_list."""
+    """Build a SHOW rule: encodingFormat in mime_list (distribution level).
+
+    Uses flat OR with individual const conditions — the same pattern as
+    _hp_mime_rule.  CzForm cannot evaluate any nesting of compound
+    conditions (AND>OR, OR>AND), so the _distributionType guard is omitted.
+    This is safe because the MIME dropdown defaults to application/zip
+    (which doesn't match any detail group) and is hidden in Web API mode.
+    """
     return {
         "effect": "SHOW",
         "condition": {
-            "type": "AND",
+            "type": "OR",
             "conditions": [
-                {
-                    "scope": "#/properties/_distributionType",
-                    "schema": {"const": "Data Download"},
-                },
-                {
-                    "scope": "#/properties/schema:encodingFormat",
-                    "schema": {"enum": mime_list},
-                },
+                {"scope": "#/properties/schema:encodingFormat",
+                 "schema": {"const": m}}
+                for m in mime_list
             ],
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Distribution-level (flattened) file detail groups
+#
+# When the stored uischema pre-flattens distribution into separate groups
+# (Archive + Files), there is no DISTRIBUTION_DETAIL injection.  These
+# groups are injected directly into the Distribution category so that
+# selecting a non-zip MIME at the distribution level reveals the
+# appropriate file-type details.
+# ---------------------------------------------------------------------------
+
+_DIST_ENC_SCOPE = (
+    "#/properties/schema:distribution/properties/schema:encodingFormat"
+)
+_DIST_PROP_PREFIX = "#/properties/schema:distribution/properties/"
+
+
+def _dist_mime_rule(mime_list):
+    """SHOW rule for distribution-level file detail groups (full scope path)."""
+    return {
+        "effect": "SHOW",
+        "condition": {
+            "type": "OR",
+            "conditions": [
+                {"scope": _DIST_ENC_SCOPE, "schema": {"const": m}}
+                for m in mime_list
+            ],
+        },
+    }
+
+
+def _dist_ctrl(prop, label):
+    """Control scoped to a distribution-level property."""
+    return {
+        "type": "Control",
+        "scope": f"{_DIST_PROP_PREFIX}{prop}",
+        "label": label,
     }
 
 
@@ -634,6 +705,122 @@ PHYSICAL_MAPPING_DATACUBE_DETAIL = {
     ],
 }
 
+
+# ---------------------------------------------------------------------------
+# Distribution-level (flattened) file detail groups
+#
+# When the stored uischema pre-flattens distribution into separate groups
+# (Archive + Files), there is no DISTRIBUTION_DETAIL injection.  These
+# groups are injected directly into the Distribution category so that
+# selecting a non-zip MIME at the distribution level reveals the
+# appropriate file-type details.
+# ---------------------------------------------------------------------------
+
+DIST_IMAGE_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Image Details",
+    "rule": _dist_mime_rule(IMAGE_MIMES),
+    "elements": [
+        _dist_ctrl("_imageComponentType", "Component Type"),
+        _dist_ctrl("acquisitionTime", "Acquisition Time"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _dist_ctrl("channel1", "Channel 1"),
+                _dist_ctrl("channel2", "Channel 2"),
+                _dist_ctrl("channel3", "Channel 3"),
+            ],
+        },
+        _dist_ctrl("pixelSize", "Pixel Size"),
+        _dist_ctrl("illuminationType", "Illumination Type"),
+        _dist_ctrl("imageType", "Image Type"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _dist_ctrl("numPixelsX", "Pixels X"),
+                _dist_ctrl("numPixelsY", "Pixels Y"),
+            ],
+        },
+        _dist_ctrl("spatialRegistration", "Spatial Registration"),
+    ],
+}
+
+DIST_TABULAR_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Tabular Data Details",
+    "rule": _dist_mime_rule(TABULAR_MIMES),
+    "elements": [
+        _dist_ctrl("_tabularComponentType", "Component Type"),
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _dist_ctrl("csvw:delimiter", "Delimiter"),
+                _dist_ctrl("csvw:quoteChar", "Quote Character"),
+                _dist_ctrl("csvw:commentPrefix", "Comment Prefix"),
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _dist_ctrl("csvw:header", "Has Header"),
+                _dist_ctrl("csvw:headerRowCount", "Header Row Count"),
+            ],
+        },
+        {
+            "type": "HorizontalLayout",
+            "elements": [
+                _dist_ctrl("countRows", "Row Count"),
+                _dist_ctrl("countColumns", "Column Count"),
+            ],
+        },
+        {
+            "type": "Control",
+            "scope": f"{_DIST_PROP_PREFIX}cdi:hasPhysicalMapping",
+            "label": "Physical Mapping",
+            "options": {
+                "elementLabelProp": "cdi:formats_InstanceVariable",
+                "detail": PHYSICAL_MAPPING_DETAIL,
+            },
+        },
+    ],
+}
+
+DIST_DATACUBE_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Data Cube Details",
+    "rule": _dist_mime_rule(DATACUBE_MIMES),
+    "elements": [
+        _dist_ctrl("_dataCubeComponentType", "Component Type"),
+        {
+            "type": "Control",
+            "scope": f"{_DIST_PROP_PREFIX}cdi:hasPhysicalMapping",
+            "label": "Physical Mapping",
+            "options": {
+                "elementLabelProp": "cdi:formats_InstanceVariable",
+                "detail": PHYSICAL_MAPPING_DATACUBE_DETAIL,
+            },
+        },
+        _dist_ctrl("dataComponentResource", "Data Component Resource"),
+    ],
+}
+
+DIST_DOCUMENT_DETAIL_GROUP = {
+    "type": "Group",
+    "label": "Document Details",
+    "rule": _dist_mime_rule(DOCUMENT_MIMES),
+    "elements": [
+        _dist_ctrl("_documentComponentType", "Component Type"),
+        _dist_ctrl("schema:version", "Version"),
+        _dist_ctrl("schema:isBasedOn", "Based On"),
+    ],
+}
+
+DIST_FILE_DETAIL_GROUPS = [
+    DIST_IMAGE_DETAIL_GROUP,
+    DIST_TABULAR_DETAIL_GROUP,
+    DIST_DATACUBE_DETAIL_GROUP,
+    DIST_DOCUMENT_DETAIL_GROUP,
+]
 
 # File-type Groups shown inside DISTRIBUTION_DETAIL based on MIME selection.
 
@@ -1486,22 +1673,24 @@ def inject_schema_defaults(schema, profile_name=None):
         # A distribution item describes one file with one MIME type;
         # single string enables simple {"const": "text/csv"} rule conditions.
         # The serializer wraps back to array on save.
-        mime_enum = _get_profile_mime_enum(profile_name)
+
+        # Distribution level — restricted MIME list (archive + primary data)
+        dist_mime_enum = _get_dist_mime_enum(profile_name)
         dist_props["schema:encodingFormat"] = {
             "type": "string",
-            "enum": mime_enum,
+            "enum": dist_mime_enum,
             "default": "application/zip",
         }
 
-        # Replace hasPart encodingFormat with single string + MIME enum
-        # (same pattern as distribution-level encodingFormat)
+        # hasPart level — full MIME list (all file types within the archive)
+        hp_mime_enum = _get_profile_mime_enum(profile_name)
         has_part = dist_props.get("schema:hasPart", {})
         hp_items = has_part.get("items", {})
         hp_props = hp_items.get("properties", {})
         if hp_props:
             hp_props["schema:encodingFormat"] = {
                 "type": "string",
-                "enum": mime_enum,
+                "enum": hp_mime_enum,
             }
             # Inject _showPhysicalStructure toggle for progressive disclosure
             hp_props["_showPhysicalStructure"] = {
@@ -1548,6 +1737,32 @@ def inject_schema_defaults(schema, profile_name=None):
                 if props_container:
                     for prop_name, enum_list in _CT_CATEGORIES.items():
                         props_container[prop_name] = {"type": "string", "enum": enum_list}
+
+        # --- Copy file-detail properties to distribution level ---
+        # The flattened uischema injects distribution-level file detail groups
+        # (DIST_*_DETAIL_GROUP) whose controls reference properties that only
+        # exist on hasPart items (from files/schema.yaml building block).
+        # Copy them to dist_props so CzForm can render them.
+        if hp_props:
+            _FILE_DETAIL_PROPS = [
+                # Data cube
+                "cdi:hasPhysicalMapping", "dataComponentResource",
+                # Image
+                "acquisitionTime", "channel1", "channel2", "channel3",
+                "pixelSize", "illuminationType", "imageType",
+                "numPixelsX", "numPixelsY", "spatialRegistration",
+                # Tabular
+                "csvw:delimiter", "csvw:quoteChar", "csvw:commentPrefix",
+                "csvw:header", "csvw:headerRowCount",
+                "countRows", "countColumns",
+                # Document
+                "schema:version", "schema:isBasedOn",
+                # componentType (source object for measurement details)
+                "componentType",
+            ]
+            for prop in _FILE_DETAIL_PROPS:
+                if prop in hp_props and prop not in dist_props:
+                    dist_props[prop] = copy.deepcopy(hp_props[prop])
 
     return result
 
@@ -1611,6 +1826,16 @@ def _walk(node, person_names=None, profile_name=None):
         if profile_name in PROFILE_MEASUREMENT_CONTROLS:
             _inject_measurement_group(options["detail"], profile_name)
 
+    # --- Distribution-level file detail groups (flattened uischema) ---
+    # When the stored uischema pre-flattens distribution into separate
+    # groups (Archive + Files), inject file-type detail groups and a
+    # zip-only rule on the hasPart group so that selecting a non-zip
+    # MIME at the distribution level shows the right detail controls.
+    if (node.get("type") == "Category"
+            and node.get("label") == "Distribution"
+            and _is_ada_profile(profile_name)):
+        _inject_dist_file_detail_groups(node, profile_name)
+
     # Recurse into child nodes
     for child in node.get("elements", []):
         _walk(child, person_names=person_names, profile_name=profile_name)
@@ -1646,3 +1871,54 @@ def _inject_name_suggestion_in_elements(elements, person_names):
             return
         # Recurse into nested layout elements (e.g., HorizontalLayout)
         _inject_name_suggestion_in_elements(element.get("elements", []), person_names)
+
+
+def _inject_dist_file_detail_groups(dist_category, profile_name):
+    """Inject distribution-level file-type detail groups into a flattened Distribution category.
+
+    When the stored uischema pre-flattens distribution (Archive group + Files group),
+    there are no file-type detail groups at the distribution level.  This function:
+    1. Adds a SHOW rule on the hasPart group/control so it only shows for zip
+    2. Appends file-type detail groups (Image, Tabular, Data Cube, Document)
+       to the Distribution category so non-zip MIMEs reveal their details.
+    """
+    elements = dist_category.get("elements", [])
+    if not elements:
+        return
+
+    # Check that this is a flattened uischema (has distribution-scoped controls,
+    # not a plain #/properties/schema:distribution array control).
+    has_flattened_dist = any(
+        _DIST_PROP_PREFIX in str(el)
+        for el in elements
+    )
+    if not has_flattened_dist:
+        return
+
+    # Add zip-only SHOW rule on the group containing hasPart
+    for el in elements:
+        if _has_scope_ending(el, "schema:hasPart"):
+            el.setdefault("rule", {
+                "effect": "SHOW",
+                "condition": {
+                    "scope": _DIST_ENC_SCOPE,
+                    "schema": {"const": "application/zip"},
+                },
+            })
+            break
+
+    # Append distribution-level file-type detail groups
+    for group in DIST_FILE_DETAIL_GROUPS:
+        injected = copy.deepcopy(group)
+        if profile_name in PROFILE_MEASUREMENT_CONTROLS:
+            _inject_measurement_group(injected, profile_name)
+        elements.append(injected)
+
+
+def _has_scope_ending(node, suffix):
+    """Check if node or any descendant has a scope ending with suffix."""
+    if not isinstance(node, dict):
+        return False
+    if node.get("scope", "").endswith(suffix):
+        return True
+    return any(_has_scope_ending(el, suffix) for el in node.get("elements", []))
