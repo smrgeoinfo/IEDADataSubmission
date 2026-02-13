@@ -1820,9 +1820,13 @@ class RecordUpdateConflictTest(TestCase):
         self.client = APIClient()
         self.client.force_authenticate(user=self.user)
 
-    def test_update_with_conflicting_identifier_deprecates(self):
-        """When update changes identifier to one that already exists, old is deprecated."""
-        # Create two records with different identifiers
+    def test_update_does_not_change_identifier(self):
+        """Update preserves original identifier even when jsonld @id differs.
+
+        Identifier conflict handling was moved to the ADA push flow
+        (ada_bridge/services.py _apply_versioning).  Regular save/update
+        must never mutate identifiers.
+        """
         resp1 = self.client.post(
             "/api/catalog/records/",
             {"profile": self.profile.pk, "jsonld": {"@id": "#aaa", "schema:name": "First"}},
@@ -1847,13 +1851,13 @@ class RecordUpdateConflictTest(TestCase):
         )
         self.assertEqual(resp3.status_code, 200)
 
-        # Record1 should be deprecated
+        # Record1 should NOT be deprecated (update doesn't touch other records)
         record1 = Record.objects.get(pk=resp1.json()["id"])
-        self.assertEqual(record1.status, "deprecated")
+        self.assertEqual(record1.status, "draft")
 
-        # Record2 should have versioned identifier
+        # Record2 keeps its original identifier
         record2 = Record.objects.get(pk=record2_id)
-        self.assertEqual(record2.identifier, "#aaa_2")
+        self.assertEqual(record2.identifier, "#bbb")
 
     def test_update_no_conflict_keeps_identifier(self):
         """Normal update without conflict preserves the identifier."""

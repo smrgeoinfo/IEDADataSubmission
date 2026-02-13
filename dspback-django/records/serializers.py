@@ -200,6 +200,7 @@ def _jsonld_equal(a: dict, b: dict) -> bool:
         if isinstance(so, dict):
             so.pop("schema:about", None)
             so.pop("schema:sdDatePublished", None)
+            so.pop("dcterms:conformsTo", None)
             so.pop("@id", None)
         d.pop("schema:dateModified", None)
         return d
