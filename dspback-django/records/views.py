@@ -19,6 +19,7 @@ from records.serializers import (
     RecordSerializer,
 )
 from records.services import extract_indexed_fields, fetch_jsonld_from_url, upsert_known_entities
+from records.profile_detection import detect_profile
 from records.validators import validate_record
 
 logger = logging.getLogger(__name__)
@@ -290,3 +291,18 @@ def organizations_search(request):
         results.append(item)
 
     return Response({"results": results})
+
+
+@api_view(["POST"])
+@permission_classes([permissions.AllowAny])
+def detect_profile_view(request):
+    """Detect the best-matching profile from JSON-LD content."""
+    jsonld = request.data.get("jsonld")
+    if not jsonld or not isinstance(jsonld, dict):
+        return Response({"detail": "jsonld field required"}, status=status.HTTP_400_BAD_REQUEST)
+    result = detect_profile(jsonld)
+    # Verify detected profile exists in DB
+    if result["profile"]:
+        if not Profile.objects.filter(name=result["profile"]).exists():
+            result = {"profile": None, "source": None}
+    return Response(result)

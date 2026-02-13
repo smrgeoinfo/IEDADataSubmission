@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from records.views import (
     ProfileViewSet,
     RecordViewSet,
+    detect_profile_view,
     me_view,
     organizations_search,
     persons_search,
@@ -17,5 +18,6 @@ urlpatterns = [
     path("me/", me_view, name="me"),
     path("persons/", persons_search, name="persons-search"),
     path("organizations/", organizations_search, name="organizations-search"),
+    path("detect-profile/", detect_profile_view, name="detect-profile"),
     path("", include(router.urls)),
 ]
