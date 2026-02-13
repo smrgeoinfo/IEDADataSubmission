@@ -49,24 +49,44 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 Building blocks have parallel files: `schema.yaml` (source) and `{name}Schema.json`. Keep them in sync — run `compare_schemas.py` after editing.
 
-## Profiles (7 total)
+## Profiles (38 total)
 
-- **ADA**: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`
-- **CDIF**: `CDIFDiscovery`, `CDIFxas`
+- **ADA** (36): `adaProduct` (base) + 35 technique-specific profiles
+  - Original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`
+  - Generated 31: `adaAIVA`, `adaAMS`, `adaARGT`, `adaDSC`, `adaEAIRMS`, `adaFTICRMS`, `adaGCMS`, `adaGPYC`, `adaIC`, `adaICPOES`, `adaL2MS`, `adaLAF`, `adaLCMS`, `adaLIT`, `adaNGNSMS`, `adaNanoIR`, `adaNanoSIMS`, `adaPSFD`, `adaQRIS`, `adaRAMAN`, `adaRITOFNGMS`, `adaSEM`, `adaSIMS`, `adaSLS`, `adaSVRUEC`, `adaTEM`, `adaToFSIMS`, `adaUVFM`, `adaVLM`, `adaXANES`, `adaXCT`
+- **CDIF** (2): `CDIFDiscovery`, `CDIFxas`
+
+## Profile Generator
+
+`tools/generate_profiles.py` is a data-driven generator that creates all technique profile building blocks from a single `PROFILES` config dict. Each profile gets: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`, `examples.yaml`.
+
+```bash
+# Generate all profiles
+python tools/generate_profiles.py
+
+# Generate a single profile
+python tools/generate_profiles.py adaSEM
+
+# List all available profiles
+python tools/generate_profiles.py --list
+```
+
+The generator auto-detects which `fileDetail` refs each profile needs based on its component types (image, imageMap, tabularData, collection, dataCube, otherFile, supDocImage, document).
 
 ## Adding a New Profile
 
-See `agents.md` > "Adding a New ADA Profile" or "Adding a New CDIF Profile" for step-by-step guides.
+For **ADA technique profiles**, add an entry to `PROFILES` in `generate_profiles.py` and re-run the generator. Then:
+1. Run `generate_profiles.py` to create the building block directory
+2. Run `resolve_schema.py` to produce `resolvedSchema.json`
+3. Add to `TERMCODE_TO_PROFILE` in `update_conformsto.py`, `validate_instance.py`, and `yaml_to_jsonld.py`
+4. Add to `ADA_PROFILES` in `convert_for_jsonforms.py`
+5. Add to `KNOWN_PROFILES` in `validate_instance.py`
+6. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/` (if UI form needed)
+7. Add `profileNames` entry in `geodat.ada-profile-form.vue` (if UI form needed)
+8. Add i18n strings in `messages.ts` (if UI form needed)
+9. `docker exec catalog python manage.py load_profiles`
 
-Quick checklist:
-1. Create building blocks under `_sources/`
-2. Create profile `schema.yaml` with `allOf` composition
-3. Resolve schema → JSON Forms conversion
-4. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/`
-5. Add to `CDIF_PROFILES` or `ADA_PROFILES` in `convert_for_jsonforms.py`
-6. Add `profileNames` entry in `geodat.ada-profile-form.vue`
-7. Add i18n strings in `messages.ts`
-8. `docker exec catalog python manage.py load_profiles`
+For **CDIF profiles**, see `agents.md` > "Adding a New CDIF Profile".
 
 ## Common Patterns
 
