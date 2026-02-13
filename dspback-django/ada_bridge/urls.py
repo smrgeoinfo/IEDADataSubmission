@@ -1,6 +1,7 @@
 from django.urls import path
 
 from ada_bridge.views import (
+    browse_directory_view,
     bundle_introspect_view,
     bundle_session_detail_view,
     bundle_session_introspect_view,
@@ -25,6 +26,9 @@ urlpatterns = [
     # Legacy bundle endpoints
     path("bundle/introspect/", bundle_introspect_view, name="bundle-introspect"),
     path("bundle/upload/<uuid:record_id>/", bundle_upload_view, name="bundle-upload"),
+
+    # Directory browser
+    path("bundle/browse-directory/", browse_directory_view, name="bundle-browse-directory"),
 
     # New session-based bundle endpoints
     path("bundle/upload/", bundle_session_upload_view, name="bundle-session-upload"),
