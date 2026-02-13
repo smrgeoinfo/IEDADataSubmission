@@ -12,13 +12,8 @@ from django.core.management.base import BaseCommand
 
 from records.models import Profile
 
-# Known parent→child relationships for base_profile FK
-PARENT_PROFILES = {
-    "adaEMPA": "adaProduct",
-    "adaICPMS": "adaProduct",
-    "adaVNMIR": "adaProduct",
-    "adaXRD": "adaProduct",
-}
+# Base profile name for all ADA technique profiles
+ADA_BASE_PROFILE = "adaProduct"
 
 def _default_profiles_dir() -> str:
     """Resolve the default profiles directory.
@@ -92,16 +87,29 @@ class Command(BaseCommand):
             self.stdout.write(f"  {action}: {name}")
             loaded.append(name)
 
-        # Second pass: set base_profile relationships
-        for child_name, parent_name in PARENT_PROFILES.items():
-            try:
-                child = Profile.objects.get(name=child_name)
-                parent = Profile.objects.get(name=parent_name)
-                if child.base_profile != parent:
-                    child.base_profile = parent
-                    child.save(update_fields=["base_profile"])
-                    self.stdout.write(f"  Linked: {child_name} → {parent_name}")
-            except Profile.DoesNotExist:
-                pass  # Parent or child not loaded yet
+        # Second pass: set base_profile and inherit uischema/defaults
+        # for all ADA technique profiles
+        try:
+            parent = Profile.objects.get(name=ADA_BASE_PROFILE)
+        except Profile.DoesNotExist:
+            parent = None
+        if parent:
+            for profile in Profile.objects.filter(name__startswith="ada").exclude(name=ADA_BASE_PROFILE):
+                updated_fields = []
+                if profile.base_profile != parent:
+                    profile.base_profile = parent
+                    updated_fields.append("base_profile")
+                    self.stdout.write(f"  Linked: {profile.name} → {ADA_BASE_PROFILE}")
+                # Inherit uischema/defaults from base if not provided
+                if not profile.uischema and parent.uischema:
+                    profile.uischema = parent.uischema
+                    updated_fields.append("uischema")
+                    self.stdout.write(f"  Inherited uischema: {profile.name} ← {ADA_BASE_PROFILE}")
+                if not profile.defaults and parent.defaults:
+                    profile.defaults = parent.defaults
+                    updated_fields.append("defaults")
+                    self.stdout.write(f"  Inherited defaults: {profile.name} ← {ADA_BASE_PROFILE}")
+                if updated_fields:
+                    profile.save(update_fields=updated_fields)
 
         self.stdout.write(self.style.SUCCESS(f"Loaded {len(loaded)} profiles: {', '.join(loaded)}"))
