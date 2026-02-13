@@ -12,12 +12,13 @@ from records.uischema_injection import inject_schema_defaults, inject_uischema
 from records.validators import validate_record
 
 # ---------------------------------------------------------------------------
-# fileDetail @type inference from componentType
+# File type inference from componentType
 # ---------------------------------------------------------------------------
 # componentType enum values are disjoint across file types, so we can build
-# a reverse lookup to infer the correct fileDetail @type from componentType.
+# a reverse lookup to infer the correct file building block @type from
+# componentType.
 
-# Maps componentType @type prefix → fileDetail @type values
+# Maps componentType @type → file building block @type values
 _FILE_TYPE_PREFIXES = {
     # image componentTypes (ada:*Image, ada:*Pattern, ada:ShapeModel*)
     "ada:AIVAImage": ["ada:image", "schema:ImageObject"],
@@ -67,19 +68,19 @@ _CATEGORY_CT_PROPS = [
 ]
 
 
-def _consolidate_component_type(file_detail):
+def _consolidate_component_type(item):
     """Map per-category UI props back to componentType.@type and strip them."""
     selected = None
     for prop in _CATEGORY_CT_PROPS:
-        val = file_detail.pop(prop, None)
+        val = item.pop(prop, None)
         if val and not selected:
             selected = val
     if selected:
-        file_detail.setdefault("componentType", {})["@type"] = selected
+        item.setdefault("componentType", {})["@type"] = selected
 
 
-def _infer_file_detail_type(component_type_value):
-    """Infer fileDetail @type from a componentType @type string."""
+def _infer_file_types(component_type_value):
+    """Infer file building block @type values from a componentType @type string."""
     if not component_type_value:
         return None
     # Exact match first
@@ -90,6 +91,23 @@ def _infer_file_detail_type(component_type_value):
         if component_type_value.startswith(prefix):
             return ft
     return None
+
+
+def _merge_inferred_file_types(item):
+    """Infer file types from componentType and merge into item @type."""
+    ct = item.get("componentType")
+    if isinstance(ct, dict):
+        ct_type = ct.get("@type", "")
+        inferred = _infer_file_types(ct_type)
+        if inferred:
+            existing = item.get("@type", [])
+            if not isinstance(existing, list):
+                existing = [existing] if existing else []
+            item["@type"] = list(dict.fromkeys(existing + inferred))
+    # Strip empty componentType to avoid validation failures
+    ct = item.get("componentType")
+    if isinstance(ct, dict) and not ct:
+        item.pop("componentType", None)
 
 
 def _strip_empty_dict(d):
@@ -104,9 +122,9 @@ def _strip_empty_dict(d):
                 del d[key]
 
 
-def _clean_physical_mapping_items(file_detail):
+def _clean_physical_mapping_items(item):
     """Strip UI-only fields and re-wrap formats_InstanceVariable in physicalMapping items."""
-    for pm in file_detail.get("cdi:hasPhysicalMapping", []):
+    for pm in item.get("cdi:hasPhysicalMapping", []):
         if not isinstance(pm, dict):
             continue
         # Strip _showAdvanced toggle
@@ -360,7 +378,7 @@ class RecordSerializer(serializers.ModelSerializer):
                     elif isinstance(enc, str):
                         dist.pop("schema:encodingFormat", None)
 
-                    # Wrap hasPart encodingFormat strings back to arrays
+                    # Wrap hasPart encodingFormat and clean file detail properties
                     for part in dist.get("schema:hasPart", []):
                         if isinstance(part, dict):
                             hp_enc = part.get("schema:encodingFormat")
@@ -368,35 +386,14 @@ class RecordSerializer(serializers.ModelSerializer):
                                 part["schema:encodingFormat"] = [hp_enc]
                             elif isinstance(hp_enc, str):
                                 part.pop("schema:encodingFormat", None)
+                            _consolidate_component_type(part)
+                            _clean_physical_mapping_items(part)
+                            _merge_inferred_file_types(part)
 
-                    # Clean physicalMapping items in fileDetail
-                    fd = dist.get("fileDetail")
-                    if isinstance(fd, dict):
-                        _consolidate_component_type(fd)
-                        _clean_physical_mapping_items(fd)
-
-                        # Infer fileDetail @type from componentType
-                        ct = fd.get("componentType")
-                        if isinstance(ct, dict):
-                            ct_type = ct.get("@type", "")
-                            inferred = _infer_file_detail_type(ct_type)
-                            if inferred:
-                                fd["@type"] = inferred
-
-                        # Strip empty fileDetail to avoid anyOf validation
-                        # failures when no componentType has been selected yet
-                        if not fd.get("@type") and not fd.get("componentType"):
-                            _strip_empty_dict(fd)
-                            if not fd:
-                                dist.pop("fileDetail", None)
-
-                    # Clean physicalMapping in hasPart fileDetails too
-                    for part in dist.get("schema:hasPart", []):
-                        if isinstance(part, dict):
-                            part_fd = part.get("fileDetail")
-                            if isinstance(part_fd, dict):
-                                _consolidate_component_type(part_fd)
-                                _clean_physical_mapping_items(part_fd)
+                    # Clean file detail properties on distribution item
+                    _consolidate_component_type(dist)
+                    _clean_physical_mapping_items(dist)
+                    _merge_inferred_file_types(dist)
 
         # Skip schema validation for draft records (imported data may not
         # conform yet — the user will fix it in the form).

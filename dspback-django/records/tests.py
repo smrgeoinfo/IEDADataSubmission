@@ -1155,23 +1155,24 @@ class DistributionInjectionTest(TestCase):
         mime_cond = doc_group["rule"]["condition"]["conditions"][1]
         self.assertIn("application/pdf", mime_cond["schema"]["enum"])
 
-    def test_file_detail_groups_use_nested_scope(self):
-        """File-type groups reference fileDetail properties with nested scope."""
+    def test_file_detail_groups_use_flat_scope(self):
+        """File-type groups reference file detail properties with flat scope."""
         detail = self._get_distribution_detail()
         image_group = detail["elements"][6]
         first_ctrl = image_group["elements"][0]
         self.assertTrue(
-            first_ctrl["scope"].startswith("#/properties/fileDetail/properties/")
+            first_ctrl["scope"].startswith("#/properties/")
         )
+        self.assertNotIn("fileDetail", first_ctrl["scope"])
 
 
 # ===================================================================
-# fileDetail @type inference tests
+# File type inference tests
 # ===================================================================
 
 
-class FileDetailTypeInferenceTest(TestCase):
-    """Test that serializer infers fileDetail.@type from componentType."""
+class FileTypeInferenceTest(TestCase):
+    """Test that serializer infers file @type from componentType."""
 
     def setUp(self):
         self.profile = Profile.objects.create(name="inferTest", schema={})
@@ -1186,15 +1187,14 @@ class FileDetailTypeInferenceTest(TestCase):
                 "schema:name": "img",
                 "_distributionType": "Data Download",
                 "schema:encodingFormat": "image/tiff",
-                "fileDetail": {
-                    "componentType": {"@type": "ada:AIVAImage"},
-                },
+                "componentType": {"@type": "ada:AIVAImage"},
             }],
         }
         serializer = RecordSerializer()
         attrs = serializer.validate(self._make_attrs(jsonld))
-        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
-        self.assertEqual(fd["@type"], ["ada:image", "schema:ImageObject"])
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertIn("ada:image", dist["@type"])
+        self.assertIn("schema:ImageObject", dist["@type"])
 
     def test_infers_tabular_by_prefix(self):
         from records.serializers import RecordSerializer
@@ -1203,30 +1203,30 @@ class FileDetailTypeInferenceTest(TestCase):
                 "schema:name": "tab",
                 "_distributionType": "Data Download",
                 "schema:encodingFormat": "text/csv",
-                "fileDetail": {
-                    "componentType": {"@type": "ada:LAFTabular"},
-                },
+                "componentType": {"@type": "ada:LAFTabular"},
             }],
         }
         serializer = RecordSerializer()
         attrs = serializer.validate(self._make_attrs(jsonld))
-        fd = attrs["jsonld"]["schema:distribution"][0]["fileDetail"]
-        self.assertEqual(fd["@type"], ["ada:tabularData", "schema:Dataset"])
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertIn("ada:tabularData", dist["@type"])
+        self.assertIn("schema:Dataset", dist["@type"])
 
     def test_no_inference_without_component_type(self):
-        """Empty fileDetail (no componentType, no @type) is stripped entirely."""
+        """No componentType means no file type inference, but dist @type is preserved."""
         from records.serializers import RecordSerializer
         jsonld = {
             "schema:distribution": [{
                 "schema:name": "bare",
                 "_distributionType": "Data Download",
                 "schema:encodingFormat": "text/csv",
-                "fileDetail": {},
             }],
         }
         serializer = RecordSerializer()
         attrs = serializer.validate(self._make_attrs(jsonld))
-        self.assertNotIn("fileDetail", attrs["jsonld"]["schema:distribution"][0])
+        dist = attrs["jsonld"]["schema:distribution"][0]
+        self.assertEqual(dist["@type"], ["schema:DataDownload"])
+        self.assertNotIn("componentType", dist)
 
 
 # ===================================================================
