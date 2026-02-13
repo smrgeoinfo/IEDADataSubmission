@@ -1490,6 +1490,7 @@ def inject_schema_defaults(schema, profile_name=None):
         dist_props["schema:encodingFormat"] = {
             "type": "string",
             "enum": mime_enum,
+            "default": "application/zip",
         }
 
         # Replace hasPart encodingFormat with single string + MIME enum
