@@ -207,6 +207,20 @@ def _stamp_sd_date_published(jsonld):
         so["schema:sdDatePublished"] = datetime.now(timezone.utc).isoformat()
 
 
+CDIF_DISCOVERY_URI = "https://w3id.org/cdif/profiles/discovery"
+
+
+def _stamp_conformsto(jsonld, profile_name):
+    """Set dcterms:conformsTo with CDIF discovery + ADA profile URI."""
+    so = jsonld.get("schema:subjectOf")
+    if not isinstance(so, dict):
+        return
+    conformsto = [{"@id": CDIF_DISCOVERY_URI}]
+    if profile_name and profile_name != "CDIFDiscovery":
+        conformsto.append({"@id": f"ada:profile/{profile_name}"})
+    so["dcterms:conformsTo"] = conformsto
+
+
 class ProfileSerializer(serializers.ModelSerializer):
     base_profile = serializers.SlugRelatedField(
         slug_field="name",
@@ -443,6 +457,7 @@ class RecordSerializer(serializers.ModelSerializer):
                 validated_data["identifier"] = str(uuid.uuid4())
 
         _stamp_sd_date_published(jsonld)
+        _stamp_conformsto(jsonld, validated_data["profile"].name)
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
@@ -454,6 +469,8 @@ class RecordSerializer(serializers.ModelSerializer):
             # Do NOT update identifier on regular save.
             # Identifier changes only happen via the ADA push flow.
             _stamp_sd_date_published(jsonld)
+            profile = validated_data.get("profile", instance.profile)
+            _stamp_conformsto(jsonld, profile.name)
             upsert_known_entities(jsonld)
 
         return super().update(instance, validated_data)
