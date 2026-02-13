@@ -200,7 +200,7 @@ def _ct_ctrl(prop, label):
     """Shorthand for a componentType property control."""
     return {
         "type": "Control",
-        "scope": f"#/properties/fileDetail/properties/componentType/properties/{prop}",
+        "scope": f"#/properties/componentType/properties/{prop}",
         "label": label,
     }
 
@@ -299,7 +299,7 @@ def _insert_after_component_type(elements, measurement_group):
         sub = element.get("elements", [])
         for i, el in enumerate(sub):
             scope = el.get("scope", "")
-            if "ComponentType" in scope and scope.startswith("#/properties/fileDetail"):
+            if "ComponentType" in scope and scope.startswith("#/properties/_"):
                 sub.insert(i + 1, copy.deepcopy(measurement_group))
                 break  # Inserted in this group, continue to next sibling
         else:
@@ -399,10 +399,10 @@ def _hp_mime_rule(mime_list):
 
 
 def _fd_ctrl(prop, label):
-    """Shorthand for a fileDetail control."""
+    """Shorthand for a file detail property control."""
     return {
         "type": "Control",
-        "scope": f"#/properties/fileDetail/properties/{prop}",
+        "scope": f"#/properties/{prop}",
         "label": label,
     }
 
@@ -561,7 +561,7 @@ TABULAR_DETAIL_GROUP = {
         },
         {
             "type": "Control",
-            "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+            "scope": "#/properties/cdi:hasPhysicalMapping",
             "label": "Physical Mapping",
             "options": {
                 "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -579,7 +579,7 @@ DATACUBE_DETAIL_GROUP = {
         _fd_ctrl("_dataCubeComponentType", "Component Type"),
         {
             "type": "Control",
-            "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+            "scope": "#/properties/cdi:hasPhysicalMapping",
             "label": "Physical Mapping",
             "options": {
                 "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -844,7 +844,7 @@ HAS_PART_DETAIL = {
                 },
                 {
                     "type": "Control",
-                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "scope": "#/properties/cdi:hasPhysicalMapping",
                     "label": "Physical Mapping",
                     "options": {
                         "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -862,7 +862,7 @@ HAS_PART_DETAIL = {
                 _fd_ctrl("_dataCubeComponentType", "Component Type"),
                 {
                     "type": "Control",
-                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "scope": "#/properties/cdi:hasPhysicalMapping",
                     "label": "Physical Mapping",
                     "options": {
                         "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -985,7 +985,7 @@ BUNDLE_HAS_PART_DETAIL = {
                 },
                 {
                     "type": "Control",
-                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "scope": "#/properties/cdi:hasPhysicalMapping",
                     "label": "Column Mapping",
                     "options": {
                         "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -1018,7 +1018,7 @@ BUNDLE_HAS_PART_DETAIL = {
             "elements": [
                 {
                     "type": "Control",
-                    "scope": "#/properties/fileDetail/properties/cdi:hasPhysicalMapping",
+                    "scope": "#/properties/cdi:hasPhysicalMapping",
                     "label": "Variable Mapping",
                     "options": {
                         "elementLabelProp": "cdi:formats_InstanceVariable",
@@ -1132,10 +1132,10 @@ DISTRIBUTION_DETAIL = {
     ],
 }
 
-# Distribution detail WITHOUT ADA-specific fileDetail groups.
-# Used for non-ADA profiles (e.g. CDIFDiscovery) that don't have fileDetail
-# in their distribution schema.  Includes CDIF-specific fields like checksum,
-# provider, terms of service, and potential action.
+# Distribution detail WITHOUT ADA-specific file detail groups.
+# Used for non-ADA profiles (e.g. CDIFDiscovery) that don't have file-type
+# detail properties in their distribution schema.  Includes CDIF-specific
+# fields like checksum, provider, terms of service, and potential action.
 DISTRIBUTION_DETAIL_BASIC = {
     "type": "VerticalLayout",
     "elements": [
@@ -1272,7 +1272,7 @@ DISTRIBUTION_DETAIL_BASIC = {
 # ---------------------------------------------------------------------------
 
 def _is_ada_profile(profile_name):
-    """Return True if this is an ADA profile (has fileDetail in distribution)."""
+    """Return True if this is an ADA profile (has file detail properties in distribution)."""
     return profile_name and profile_name.startswith("ada")
 
 
@@ -1375,12 +1375,10 @@ def inject_schema_defaults(schema, profile_name=None):
 
         # --- physicalMapping item defaults ---
         # Inject _showAdvanced boolean and simplify formats_InstanceVariable
-        # for each place physicalMapping appears (distribution-level fileDetail
-        # and hasPart-level fileDetail).
+        # for each place physicalMapping appears (distribution-level and
+        # hasPart-level).
         for props_container in [dist_props, hp_props]:
-            fd_schema = props_container.get("fileDetail", {})
-            fd_props = fd_schema.get("properties", {})
-            pm = fd_props.get("cdi:hasPhysicalMapping", {})
+            pm = props_container.get("cdi:hasPhysicalMapping", {})
             pm_items = pm.get("items", {})
             pm_props = pm_items.get("properties", {})
             if pm_props:
@@ -1407,11 +1405,9 @@ def inject_schema_defaults(schema, profile_name=None):
                 "_documentComponentType": DOCUMENT_COMPONENT_TYPES + GENERIC_COMPONENT_TYPES,
             }
             for props_container in [dist_props, hp_props]:
-                fd_schema = props_container.get("fileDetail", {})
-                fd_props = fd_schema.get("properties", {})
-                if fd_props:
+                if props_container:
                     for prop_name, enum_list in _CT_CATEGORIES.items():
-                        fd_props[prop_name] = {"type": "string", "enum": enum_list}
+                        props_container[prop_name] = {"type": "string", "enum": enum_list}
 
     return result
 
