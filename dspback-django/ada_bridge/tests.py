@@ -488,13 +488,13 @@ class BundleIntrospectionTest(TestCase):
         finally:
             os.unlink(path)
 
-    def test_introspect_warnings_when_no_inspectors(self):
+    def test_introspect_csv_produces_no_warnings(self):
+        """A simple CSV is inspected successfully with no warnings."""
         path = self._create_zip({"data.csv": "a,b\n1,2\n"})
         try:
             result = introspect_bundle(path)
-            # ada_metadata_forms is not installed in test env
-            has_warning = any("ada_metadata_forms" in w for w in result["warnings"])
-            self.assertTrue(has_warning)
+            self.assertEqual(result["warnings"], [])
+            self.assertIn("data.csv", result["files"])
         finally:
             os.unlink(path)
 
