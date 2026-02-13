@@ -71,7 +71,7 @@ python tools/generate_profiles.py adaSEM
 python tools/generate_profiles.py --list
 ```
 
-The generator auto-detects which `fileDetail` refs each profile needs based on its component types (image, imageMap, tabularData, collection, dataCube, otherFile, supDocImage, document).
+The generator produces technique profile schemas that constrain `schema:additionalType` at the product and hasPart levels. File-type constraints (image, tabular, etc.) come from the shared `files/schema.yaml` building block via `allOf` composition — individual profiles no longer need file-type refs.
 
 ## Adding a New Profile
 
@@ -99,9 +99,9 @@ For **CDIF profiles**, see `agents.md` > "Adding a New CDIF Profile".
 
 ## Technique-Specific Measurement Details
 
-ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties from building block detail schemas. These properties live inside `fileDetail.componentType` in the schema.
+ADA technique profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties from building block detail schemas. These properties live inside `componentType` at the hasPart item level (flat — no `fileDetail` wrapper).
 
-- **Schema pipeline**: `_collect_component_type_info()` in `convert_for_jsonforms.py` collects both `@type` enum values AND non-`@type` detail properties from componentType anyOf branches, merging them into `componentType.properties`
+- **Schema pipeline**: `_collect_component_type_info()` in `convert_for_jsonforms.py` collects both `@type` enum values AND non-`@type` detail properties from componentType anyOf branches, merging them into `componentType.properties`. The file-type `anyOf` (from `files/schema.yaml`) appears at the hasPart items level; `_is_file_type_anyof()` detects it and `simplify_file_detail_anyof()` merges all branches into flat properties on the hasPart item.
 - **UISchema injection**: `PROFILE_MEASUREMENT_CONTROLS` in `uischema_injection.py` maps technique profiles to measurement detail UI controls. `_inject_measurement_group()` inserts the group after each ComponentType dropdown in all file-type detail groups (Image, Tabular, Data Cube, Document)
 - **adaProduct/adaICPMS/CDIF**: No measurement detail groups injected (not in `PROFILE_MEASUREMENT_CONTROLS`)
 - To add measurement details for a new technique, add an entry to `PROFILE_MEASUREMENT_CONTROLS` using `_ct_ctrl(prop, label)` helper
