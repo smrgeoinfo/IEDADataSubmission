@@ -18,14 +18,14 @@ ADA_BASE_PROFILE = "adaProduct"
 def _default_profiles_dir() -> str:
     """Resolve the default profiles directory.
 
-    In Docker the submodule is mounted at /OCGbuildingBlockTest.
+    In Docker the submodule is mounted at /BuildingBlockSubmodule.
     Locally it sits next to dspback-django in the repo root.
     """
-    docker_path = Path("/OCGbuildingBlockTest/build/jsonforms/profiles")
+    docker_path = Path("/BuildingBlockSubmodule/build/jsonforms/profiles")
     if docker_path.is_dir():
         return str(docker_path)
     # Fallback: relative to the manage.py location (repo root / dspback-django)
-    local_path = Path(__file__).resolve().parents[4] / "OCGbuildingBlockTest/build/jsonforms/profiles"
+    local_path = Path(__file__).resolve().parents[4] / "BuildingBlockSubmodule/build/jsonforms/profiles"
     return str(local_path)
 
 
@@ -37,7 +37,7 @@ class Command(BaseCommand):
             "--profiles-dir",
             type=str,
             default=None,
-            help="Path to the profiles directory (default: ../OCGbuildingBlockTest/build/jsonforms/profiles/)",
+            help="Path to the profiles directory (default: ../BuildingBlockSubmodule/build/jsonforms/profiles/)",
         )
 
     def handle(self, *args, **options):

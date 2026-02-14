@@ -13,7 +13,7 @@ The project is a monorepo with four main components (three as git submodules, on
 | `dspback/` | FastAPI, PostgreSQL (SQLAlchemy/asyncpg), Python | Submodule: `smrgeoinfo/dspback` (`develop`) | REST API for metadata CRUD, auth, search |
 | `dspback-django/` | Django 5.1, DRF, SimpleJWT, PostgreSQL | Local directory | Profile-driven metadata catalog API |
 | `dspfront/` | Vue 3, TypeScript, Vuex ORM, Vuetify | Submodule: `smrgeoinfo/dspfront` (`develop`) | SPA for forms, submissions, discovery |
-| `OCGbuildingBlockTest/` | YAML schemas, JSON-LD | Submodule: `smrgeoinfo/OCGbuildingBlockTest` (`master`) | Modular schema components (OGC Building Blocks) |
+| `BuildingBlockSubmodule/` | YAML schemas, JSON-LD | Submodule: `usgin/metadataBuildingBlocks` (`main`) | Modular schema components (OGC Building Blocks) |
 
 `dspback` and `dspback-django` coexist: nginx routes `/api/catalog/*` to Django (port 5003) and `/api/*` to FastAPI (port 5002). They use separate databases (`catalog` and `dsp`) on the same PostgreSQL instance.
 
@@ -91,7 +91,7 @@ Frontend models extend `Repository` (in `models/repository.model.ts`). Each repo
 
 ### OGC Building Blocks
 
-Complex schemas (like ADA's 37 `$defs`) are decomposed into modular directories under `OCGbuildingBlockTest/_sources/`. Each building block has `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The top-level profile (`profiles/adaProduct/`) composes all blocks.
+Complex schemas (like ADA's 37 `$defs`) are decomposed into modular directories under `BuildingBlockSubmodule/_sources/`. Each building block has `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The top-level profile (`profiles/adaProduct/`) composes all blocks.
 
 Instrument-specific detail types (EMPA, XRD, NanoSIMS, etc.) are each in their own BB directory under `adaProperties/detailXxx/` (e.g., `detailEMPA/`, `detailXRD/`). This allows technique profiles to `$ref` only the specific detail type(s) they need (e.g., `$ref: ../detailEMPA/schema.yaml`) instead of using fragment pointers into a monolithic file. The old `details/` BB is now an umbrella schema that references all 16 detail BBs via `anyOf`.
 
@@ -258,13 +258,13 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 **38 profiles**: `adaProduct` (base) + 35 technique-specific ADA profiles (original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`; plus 31 generated profiles), `CDIFDiscovery`, `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`, plus `fileDetail` `anyOf` subsets. Each technique profile has per-profile MIME filtering and componentType dropdown filtering derived from `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
 
 **Key files**:
-- `OCGbuildingBlockTest/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
-- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — JSON Forms converter (resolvedSchema.json → schema.json)
-- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Fully resolved Draft 2020-12 schemas
-- `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/uischema.json` — Hand-crafted UI layouts
-- `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/defaults.json` — Default values
-- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
-- `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — CI workflow
+- `BuildingBlockSubmodule/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
+- `BuildingBlockSubmodule/tools/convert_for_jsonforms.py` — JSON Forms converter (resolvedSchema.json → schema.json)
+- `BuildingBlockSubmodule/_sources/profiles/*/resolvedSchema.json` — Fully resolved Draft 2020-12 schemas
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/*/uischema.json` — Hand-crafted UI layouts
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/*/defaults.json` — Default values
+- `BuildingBlockSubmodule/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
+- `BuildingBlockSubmodule/.github/workflows/generate-jsonforms.yml` — CI workflow
 - `dspfront/src/components/metadata/geodat.ada-profile-form.vue` — ADA form component
 - `dspfront/src/components/metadata/geodat.cdif-form.vue` — CDIF form component
 - `dspfront/src/components/metadata/geodat.ada-select-type.vue` — Profile selection
@@ -275,14 +275,14 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 To add a new technique profile (e.g., `adaXRF`):
 
-1. **OGC Building Block** — Create `OCGbuildingBlockTest/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add:
+1. **OGC Building Block** — Create `BuildingBlockSubmodule/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add:
    - `schema:additionalType` constraint with `contains`/`enum` for valid component types
    - `schema:measurementTechnique` constraint (if needed)
    - `fileDetail` constraint with `anyOf` listing only the file types valid for this technique (e.g., `$ref: ../../adaProperties/tabularData/schema.yaml`)
    - Copy from an existing technique profile (e.g., `adaEMPA`).
-2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `OCGbuildingBlockTest` directory.
-3. **JSON Forms static files** — Create `OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
-4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `OCGbuildingBlockTest/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
+2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `BuildingBlockSubmodule` directory.
+3. **JSON Forms static files** — Create `BuildingBlockSubmodule/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
+4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `BuildingBlockSubmodule/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
 5. **MIME / componentType filtering** — Add an entry to `PROFILE_COMPONENT_TYPES` in `dspback-django/records/uischema_injection.py` listing the profile's `ada:`-prefixed component types. MIME type filtering and componentType dropdown filtering are both auto-derived from this dict. Also add any new component types to the appropriate global category list (`IMAGE_COMPONENT_TYPES`, `TABULAR_COMPONENT_TYPES`, `DATACUBE_COMPONENT_TYPES`, `DOCUMENT_COMPONENT_TYPES`).
 6. **Measurement details** *(optional)* — If the technique has a dedicated detail building block (e.g., `detailXRF/`) with measurement properties, add an entry to `PROFILE_MEASUREMENT_CONTROLS` in `dspback-django/records/uischema_injection.py`. Use the `_ct_ctrl(prop, label)` helper for controls. The measurement group is automatically inserted after each ComponentType dropdown in the form.
 7. **Load profile into catalog** — Run `docker exec catalog python manage.py load_profiles` to load the new profile from the BB build output. The profile list in the frontend is fetched dynamically from the catalog API, so no frontend code changes are needed for the selection page.
@@ -293,8 +293,8 @@ To add a new technique profile (e.g., `adaXRF`):
 
 To add a new domain-specific CDIF profile (e.g., `CDIFxas`):
 
-1. **Domain building blocks** — Create building blocks under `OCGbuildingBlockTest/_sources/xasProperties/` (or similar domain directory). Each BB has `bblock.json`, `schema.yaml`, `{name}Schema.json`. The YAML schema defines constraints using `allOf`/`contains` patterns. Keep a parallel JSON schema (`{name}Schema.json`) for direct use.
-2. **Profile** — Create `OCGbuildingBlockTest/_sources/profiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
+1. **Domain building blocks** — Create building blocks under `BuildingBlockSubmodule/_sources/xasProperties/` (or similar domain directory). Each BB has `bblock.json`, `schema.yaml`, `{name}Schema.json`. The YAML schema defines constraints using `allOf`/`contains` patterns. Keep a parallel JSON schema (`{name}Schema.json`) for direct use.
+2. **Profile** — Create `BuildingBlockSubmodule/_sources/profiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
    ```yaml
    allOf:
    - $ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json
@@ -432,7 +432,7 @@ Both filters are applied in `inject_schema_defaults()` at serve time. No fronten
 
 ### CDIF Profile Schema Notes
 
-The CDIF Discovery profile schema is built from OGC Building Block source schemas under `OCGbuildingBlockTest/_sources/`. Key authoring pitfalls:
+The CDIF Discovery profile schema is built from OGC Building Block source schemas under `BuildingBlockSubmodule/_sources/`. Key authoring pitfalls:
 
 **UISchema scopes must match schema property names exactly.** All schema.org properties use the `schema:` prefix (e.g., `schema:name`, `schema:funder`). UISchema scopes must include this prefix — `#/properties/schema:name` not `#/properties/name`. Missing prefixes cause "No applicable renderer found" errors because CzForm can't resolve the scope to a schema property.
 

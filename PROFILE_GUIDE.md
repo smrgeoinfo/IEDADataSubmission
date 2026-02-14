@@ -48,7 +48,7 @@ All paths below are relative to the repository root (`IEDADataSubmission/`).
 ## Architecture Overview
 
 ```
-OCGbuildingBlockTest/
+BuildingBlockSubmodule/
 ├── _sources/
 │   ├── schemaorgProperties/     # Shared CDIF building blocks (cdifMandatory, cdifOptional, etc.)
 │   ├── adaProperties/           # ADA-specific building blocks (instruments, files, details)
@@ -96,7 +96,7 @@ If your profile needs domain-specific constraints not covered by existing buildi
 
 ### Directory structure
 
-Each building block is a directory under `OCGbuildingBlockTest/_sources/`. Create a domain directory (e.g., `xasProperties/`) with subdirectories for each building block:
+Each building block is a directory under `BuildingBlockSubmodule/_sources/`. Create a domain directory (e.g., `xasProperties/`) with subdirectories for each building block:
 
 ```
 _sources/xasProperties/
@@ -128,7 +128,7 @@ Required metadata file. Copy from an existing building block and adjust:
   "register": "cdif-building-block-register",
   "version": "0.1",
   "dateOfLastChange": "2026-02-11",
-  "link": "https://github.com/smrgeoinfo/OCGbuildingBlockTest",
+  "link": "https://github.com/usgin/metadataBuildingBlocks",
   "maturity": "draft",
   "scope": "unstable",
   "tags": ["xas", "spectroscopy", "cdif"],
@@ -177,7 +177,7 @@ Create an example JSON instance that validates against the building block schema
 
 ## Step 2: Create the Profile Schema
 
-Create a profile directory under `OCGbuildingBlockTest/_sources/profiles/`.
+Create a profile directory under `BuildingBlockSubmodule/_sources/profiles/`.
 
 ### For an ADA technique profile
 
@@ -243,7 +243,7 @@ The `allOf` composition merges all properties from each referenced schema.
 
 ## Step 3: Resolve the Schema
 
-From the `OCGbuildingBlockTest/` directory, run:
+From the `BuildingBlockSubmodule/` directory, run:
 
 ```bash
 python tools/resolve_schema.py <ProfileName> --flatten-allof \
@@ -427,7 +427,7 @@ For technique-specific profiles, include any values that are always the same. Fo
 
 ## Step 5: Register in the Conversion Script
 
-Edit `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` and add your profile name to the appropriate list (near the top of the file):
+Edit `BuildingBlockSubmodule/tools/convert_for_jsonforms.py` and add your profile name to the appropriate list (near the top of the file):
 
 ```python
 # For ADA technique profiles:
@@ -459,7 +459,7 @@ CDIF profiles do **not** need a `PARENT_PROFILES` entry. They are auto-discovere
 
 ## Step 6: Generate the Draft 7 Schema
 
-From the `OCGbuildingBlockTest/` directory, run:
+From the `BuildingBlockSubmodule/` directory, run:
 
 ```bash
 # Single profile:
@@ -592,7 +592,7 @@ curl -s http://localhost/api/catalog/profiles/CDIFxas/ | python -m json.tool | h
 ### Validate the example instance against the resolved schema
 
 ```bash
-cd OCGbuildingBlockTest
+cd BuildingBlockSubmodule
 python -c "
 import json, jsonschema
 schema = json.load(open('_sources/profiles/CDIFxas/resolvedSchema.json'))

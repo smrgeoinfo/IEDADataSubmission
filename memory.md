@@ -40,8 +40,8 @@ Each contains: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`.
 - `dspfront/src/constants.ts` — `APP_NAME` → `'IEDA Hub'`
 - `dspfront/vite.config.ts` — PWA manifest name/short_name → `'IEDA Hub'`
 - `dspfront/src/modules/vuex.ts` — Vuex persisted state key → `'IEDA Hub'`
-- `OCGbuildingBlockTest/_sources/jsonforms/profiles/*/uischema.json` (all 5) — Root type changed from `VerticalLayout` to `Categorization` with 5 `Category` elements
-- `OCGbuildingBlockTest/tools/cors_server.py` — Added `Cache-Control: no-cache` header
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/*/uischema.json` (all 5) — Root type changed from `VerticalLayout` to `Categorization` with 5 `Category` elements
+- `BuildingBlockSubmodule/tools/cors_server.py` — Added `Cache-Control: no-cache` header
 
 **Note on vuex key change:** Changing the vuex persisted state key from `"CZ Hub"` to `"IEDA Hub"` means previously persisted local state won't carry over — users start with fresh state on first visit after this change.
 
@@ -71,7 +71,7 @@ Each contains: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`.
 
 **Infrastructure:**
 - `dspback-django/Dockerfile-dev` — Python 3.12-slim, gunicorn
-- `docker-compose-dev.yml` — Added `catalog` service, mounted `OCGbuildingBlockTest` volume, added `scripts/init-catalog-db.sh` to postgres init
+- `docker-compose-dev.yml` — Added `catalog` service, mounted `BuildingBlockSubmodule` volume, added `scripts/init-catalog-db.sh` to postgres init
 - `nginx/nginx-dev.conf` — Added `/api/catalog` location block before `/api`
 - `.env` — Added `CATALOG_DATABASE`, `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`
 
@@ -192,7 +192,7 @@ Component names, class names, and CSS selectors updated accordingly (e.g., `cz-a
 **What changed:** Fixed three issues in the CDIF Discovery profile's funding section.
 
 **Bug 1 — "No applicable renderer found" in funding detail:**
-The hand-crafted CDIF uischema (`OCGbuildingBlockTest/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json`) had wrong scopes in the funding detail — missing `schema:` prefixes. CzForm couldn't find renderers because the scopes didn't match any schema properties.
+The hand-crafted CDIF uischema (`BuildingBlockSubmodule/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json`) had wrong scopes in the funding detail — missing `schema:` prefixes. CzForm couldn't find renderers because the scopes didn't match any schema properties.
 
 Fixes applied:
 - `#/properties/name` → `#/properties/schema:name`
@@ -209,10 +209,10 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 **Validation note:** `schema:funder` is correctly required in funding items (via `allOf`). Metadata files with funding items that lack `schema:funder` will trigger a validation warning — this is expected and correct.
 
 **Files changed:**
-- `OCGbuildingBlockTest/_sources/schemaorgProperties/funder/schema.yaml` — Added `schema:description` property
-- `OCGbuildingBlockTest/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json` — Fixed funding scopes, added identifier detail, added description control
-- `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/schema.json` — Added `schema:description` to funding items
-- `OCGbuildingBlockTest/build/jsonforms/profiles/CDIFDiscovery/uischema.json` — Same fixes as source
+- `BuildingBlockSubmodule/_sources/schemaorgProperties/funder/schema.yaml` — Added `schema:description` property
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/CDIFDiscovery/uischema.json` — Fixed funding scopes, added identifier detail, added description control
+- `BuildingBlockSubmodule/build/jsonforms/profiles/CDIFDiscovery/schema.json` — Added `schema:description` to funding items
+- `BuildingBlockSubmodule/build/jsonforms/profiles/CDIFDiscovery/uischema.json` — Same fixes as source
 
 ## 2026-02-08: Merge hasPartFile into files Building Block
 
@@ -229,11 +229,11 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 **Deleted:** `_sources/adaProperties/hasPartFile/` directory (schema.yaml, bblock.json, context.jsonld, description.md).
 
 **Files changed:**
-- `OCGbuildingBlockTest/_sources/adaProperties/files/schema.yaml` — Removed `contains`/`minItems` constraint on `@type`, updated description
-- `OCGbuildingBlockTest/_sources/profiles/adaProduct/schema.yaml` — Rewrote `schema:distribution` section with `oneOf`+`allOf` composition pattern
-- `OCGbuildingBlockTest/_sources/adaProperties/hasPartFile/` — Deleted entirely
-- `OCGbuildingBlockTest/agents.md` — Removed `hasPartFile` entry, updated `files` description
-- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
+- `BuildingBlockSubmodule/_sources/adaProperties/files/schema.yaml` — Removed `contains`/`minItems` constraint on `@type`, updated description
+- `BuildingBlockSubmodule/_sources/profiles/adaProduct/schema.yaml` — Rewrote `schema:distribution` section with `oneOf`+`allOf` composition pattern
+- `BuildingBlockSubmodule/_sources/adaProperties/hasPartFile/` — Deleted entirely
+- `BuildingBlockSubmodule/agents.md` — Removed `hasPartFile` entry, updated `files` description
+- `BuildingBlockSubmodule/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
 - `README.md` — Updated building block tree to remove `hasPartFile`
 
 ## 2026-02-09: Resolved (JSON) Button in bblocks-viewer
@@ -262,11 +262,11 @@ Metadata files may include `schema:description` on funding items (e.g., grant ac
 The workflow chain is: push → "Validate and process Building Blocks" (OGC postprocessor) → triggers both "Generate JSON Forms schemas" and "Deploy custom bblocks-viewer".
 
 **Files changed:**
-- `OCGbuildingBlockTest/tools/augment_register.py` — New script
-- `OCGbuildingBlockTest/.github/workflows/generate-jsonforms.yml` — Added augment step + register.json staging
-- `OCGbuildingBlockTest/.github/workflows/deploy-viewer.yml` — New workflow: re-deploys Pages with custom viewer + augmented register
-- `OCGbuildingBlockTest/tools/cors_server.py` — Added directory argument
-- `OCGbuildingBlockTest/build/register.json` — 6 profile bblocks now have `resolvedSchema` URLs
+- `BuildingBlockSubmodule/tools/augment_register.py` — New script
+- `BuildingBlockSubmodule/.github/workflows/generate-jsonforms.yml` — Added augment step + register.json staging
+- `BuildingBlockSubmodule/.github/workflows/deploy-viewer.yml` — New workflow: re-deploys Pages with custom viewer + augmented register
+- `BuildingBlockSubmodule/tools/cors_server.py` — Added directory argument
+- `BuildingBlockSubmodule/build/register.json` — 6 profile bblocks now have `resolvedSchema` URLs
 - `smrgeoinfo/bblocks-viewer` (GitHub fork) — Fork of `ogcincubator/bblocks-viewer` with Resolved (JSON) button; deployed to GitHub Pages at `smrgeoinfo.github.io/bblocks-viewer/`
 - `/tmp/bblocks-viewer/src/components/bblock/JsonSchemaViewer.vue` — Added Resolved (JSON) button
 - `/tmp/bblocks-viewer/src/services/bblock.service.js` — Added `resolvedSchema` to COPY_PROPERTIES
@@ -305,15 +305,15 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 - Pipeline order fix: `simplify_contains_to_enum` must run before `simplify_const_to_default` (otherwise WebAPI `@type` `contains.const` gets converted to `contains.default` and the enum simplifier can't find it)
 
 **Files changed:**
-- `OCGbuildingBlockTest/tools/resolve_schema.py` — `deep_merge` → `_deep_merge_inner` with `_is_complete_schema` heuristic; added `_inline_unresolved_defs` for pass-2 cross-def resolution
-- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Complete refactor to read from resolvedSchema.json
-- `OCGbuildingBlockTest/_sources/profiles/adaProduct/schema.yaml` — Added WebAPI as 3rd distribution oneOf branch
-- `OCGbuildingBlockTest/_sources/profiles/adaEMPA/schema.yaml` — Added fileDetail anyOf constraint (6 file types)
-- `OCGbuildingBlockTest/_sources/profiles/adaICPMS/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
-- `OCGbuildingBlockTest/_sources/profiles/adaVNMIR/schema.yaml` — Added fileDetail anyOf constraint (5 file types)
-- `OCGbuildingBlockTest/_sources/profiles/adaXRD/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
-- `OCGbuildingBlockTest/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
-- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
+- `BuildingBlockSubmodule/tools/resolve_schema.py` — `deep_merge` → `_deep_merge_inner` with `_is_complete_schema` heuristic; added `_inline_unresolved_defs` for pass-2 cross-def resolution
+- `BuildingBlockSubmodule/tools/convert_for_jsonforms.py` — Complete refactor to read from resolvedSchema.json
+- `BuildingBlockSubmodule/_sources/profiles/adaProduct/schema.yaml` — Added WebAPI as 3rd distribution oneOf branch
+- `BuildingBlockSubmodule/_sources/profiles/adaEMPA/schema.yaml` — Added fileDetail anyOf constraint (6 file types)
+- `BuildingBlockSubmodule/_sources/profiles/adaICPMS/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
+- `BuildingBlockSubmodule/_sources/profiles/adaVNMIR/schema.yaml` — Added fileDetail anyOf constraint (5 file types)
+- `BuildingBlockSubmodule/_sources/profiles/adaXRD/schema.yaml` — Added fileDetail anyOf constraint (3 file types)
+- `BuildingBlockSubmodule/_sources/profiles/*/resolvedSchema.json` — Regenerated for all 6 profiles
+- `BuildingBlockSubmodule/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
 
 ## 2026-02-09: MIME-Type-Driven Distribution Form with Per-Profile Filtering
 
@@ -359,8 +359,8 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 - `dspback-django/records/uischema_injection.py` — encodingFormat→string, archive rule fix, MIME categories, fileDetail Groups, per-profile filtering
 - `dspback-django/records/serializers.py` — encodingFormat wrap/unwrap, fileDetail @type inference, profile_name passthrough
 - `dspfront/src/services/catalog.ts` — encodingFormat array→string unwrap in populateOnLoad()
-- `OCGbuildingBlockTest/tools/convert_for_jsonforms.py` — Flatten fileDetail anyOf into merged object
-- `OCGbuildingBlockTest/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
+- `BuildingBlockSubmodule/tools/convert_for_jsonforms.py` — Flatten fileDetail anyOf into merged object
+- `BuildingBlockSubmodule/build/jsonforms/profiles/*/schema.json` — Regenerated for all 6 profiles
 - `dspback-django/records/tests.py` — 123 tests (up from 99)
 
 ## 2026-02-09: MIME-Driven Groups in hasPart (Archive Contents)

@@ -2,7 +2,7 @@
 
 A web application for submitting, managing, and discovering research data across multiple Earth Science repositories. This monorepo contains the backend API, frontend application, deployment configuration, and OGC Building Blocks for schema modularization.
 
-`dspback`, `dspfront`, and `OCGbuildingBlockTest` are included as [git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) pointing to their respective repositories.
+`dspback`, `dspfront`, and `BuildingBlockSubmodule` are included as [git submodules](https://git-scm.com/book/en/v2/Git-Tools-Submodules) pointing to their respective repositories.
 
 ## Repository Structure
 
@@ -11,7 +11,7 @@ IEDADataSubmission/
 ├── dspback/                 # FastAPI backend (submodule → smrgeoinfo/dspback, develop)
 ├── dspback-django/          # Django catalog backend (profile-driven metadata records + ADA bridge)
 ├── dspfront/                # Vue.js frontend (submodule → smrgeoinfo/dspfront, develop)
-├── OCGbuildingBlockTest/    # OGC Building Blocks (submodule → smrgeoinfo/OCGbuildingBlockTest, master)
+├── BuildingBlockSubmodule/    # OGC Building Blocks (submodule → usgin/metadataBuildingBlocks, main)
 ├── scrapers/                # Repository metadata scrapers
 ├── jsonld/                  # JSON-LD normalization examples
 ├── nginx/                   # Nginx reverse proxy configs
@@ -133,15 +133,15 @@ Technique-specific ADA profiles (adaVNMIR, adaEMPA, adaXRD) display measurement 
 
 To add a new technique profile (e.g., `adaXRF`):
 
-**1. OGC Building Block** (`OCGbuildingBlockTest/_sources/profiles/adaXRF/`)
+**1. OGC Building Block** (`BuildingBlockSubmodule/_sources/profiles/adaXRF/`)
 
 Create the BB directory with `bblock.json`, `schema.yaml`, `context.jsonld`, and `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add technique-specific `enum` constraints on `schema:additionalType` and `schema:measurementTechnique`. See an existing technique profile (e.g., `adaEMPA`) as a template.
 
-**2. JSON Forms static files** (`OCGbuildingBlockTest/_sources/jsonforms/profiles/adaXRF/`)
+**2. JSON Forms static files** (`BuildingBlockSubmodule/_sources/jsonforms/profiles/adaXRF/`)
 
 Create `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust default values (e.g., `schema:additionalType`, `schema:measurementTechnique`).
 
-**3. Schema conversion** (`OCGbuildingBlockTest/tools/convert_for_jsonforms.py`)
+**3. Schema conversion** (`BuildingBlockSubmodule/tools/convert_for_jsonforms.py`)
 
 Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list so the conversion script processes it. The generated `schema.json` will appear in `build/jsonforms/profiles/adaXRF/`.
 
@@ -352,7 +352,7 @@ Docker Compose configuration and supporting services live at the repository root
 - `scrapers/` — Repository metadata scrapers (HydroShare, EarthChem, discovery)
 - `jsonld/` — JSON-LD normalization examples per repository
 
-### OCGbuildingBlockTest — OGC Building Blocks
+### BuildingBlockSubmodule — OGC Building Blocks
 
 Modular schema components following the [OGC Building Blocks](https://opengeospatial.github.io/bblocks/) pattern. Each building block is a self-contained directory with a schema, JSON-LD context, metadata, and description.
 
@@ -361,7 +361,7 @@ Modular schema components following the [OGC Building Blocks](https://opengeospa
 The ADA metadata schema (37 `$defs` from `adaMetadata-SchemaOrgSchema-v2.json`) has been decomposed into modular building blocks:
 
 ```
-OCGbuildingBlockTest/_sources/
+BuildingBlockSubmodule/_sources/
 ├── adaProperties/
 │   ├── stringArray/           # Reusable string array utility type
 │   ├── creativeWork/          # schema:CreativeWork labeled links
@@ -417,7 +417,7 @@ A GitHub Actions workflow (`Validate and process Building Blocks`) runs on every
 #### JSON Forms Schema Tools
 
 ```
-OCGbuildingBlockTest/tools/
+BuildingBlockSubmodule/tools/
 ├── convert_for_jsonforms.py   # Converts Draft 2020-12 → Draft 7, resolves $ref, simplifies anyOf
 ├── resolve_schema.py          # Resolves $ref in BB schemas (used by validation workflow)
 ├── compare_schemas.py         # Compares YAML and JSON schemas across all BBs for consistency
@@ -427,7 +427,7 @@ OCGbuildingBlockTest/tools/
 #### JSON Forms Static Files (hand-crafted)
 
 ```
-OCGbuildingBlockTest/_sources/jsonforms/profiles/
+BuildingBlockSubmodule/_sources/jsonforms/profiles/
 ├── adaProduct/
 │   ├── uischema.json    # UI layout (groups, ordering, widgets)
 │   └── defaults.json    # Default values (@context, @type, empty arrays)
@@ -442,7 +442,7 @@ OCGbuildingBlockTest/_sources/jsonforms/profiles/
 #### JSON Forms Generated Output
 
 ```
-OCGbuildingBlockTest/build/jsonforms/profiles/
+BuildingBlockSubmodule/build/jsonforms/profiles/
 ├── adaProduct/schema.json    # Fully resolved Draft 7 schema
 ├── adaEMPA/schema.json
 ├── adaXRD/schema.json

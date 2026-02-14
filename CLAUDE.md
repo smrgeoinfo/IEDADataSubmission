@@ -2,13 +2,13 @@
 
 ## Project Overview
 
-IEDA Data Submission Portal — monorepo with FastAPI backend (`dspback/`), Django catalog backend (`dspback-django/`), Vue 3 frontend (`dspfront/`), and OGC Building Blocks (`OCGbuildingBlockTest/`). Three are git submodules.
+IEDA Data Submission Portal — monorepo with FastAPI backend (`dspback/`), Django catalog backend (`dspback-django/`), Vue 3 frontend (`dspfront/`), and OGC Building Blocks (`BuildingBlockSubmodule/`). Three are git submodules.
 
 ## Key Commands
 
 ```bash
 # Resolve a building block schema
-cd OCGbuildingBlockTest
+cd BuildingBlockSubmodule
 python tools/resolve_schema.py <ProfileName> --flatten-allof -o _sources/profiles/<ProfileName>/resolvedSchema.json
 
 # Convert to JSON Forms
@@ -34,7 +34,7 @@ docker compose -f docker-compose-demo.yml up -d --build
 
 ## Git Submodule Structure
 
-- `OCGbuildingBlockTest/` — master branch, remote: `smrgeoinfo/OCGbuildingBlockTest`
+- `BuildingBlockSubmodule/` — main branch, remote: `usgin/metadataBuildingBlocks`
 - `dspfront/` — develop branch, remote: `smrgeoinfo/dspfront`
 - `dspback/` — develop branch, remote: `smrgeoinfo/dspback`
 - Parent repo — main branch

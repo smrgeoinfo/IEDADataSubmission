@@ -41,7 +41,7 @@ services:
     image: catalog
     container_name: catalog
     volumes:
-      - ./OCGbuildingBlockTest:/OCGbuildingBlockTest
+      - ./BuildingBlockSubmodule:/BuildingBlockSubmodule
     env_file: .env
     build:
       context: ./dspback-django
