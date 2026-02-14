@@ -584,3 +584,53 @@ IEDADataSubmission (dspback-django)         ADA API (Django/DRF)
 - `dspback-django/records/tests.py` — Added 4 test classes (20 tests): `GeneratedProfileMimeFilterTest`, `ComponentTypeDropdownFilterTest`, `InjectSchemaComponentTypeFilterTest`, `BackwardCompatProfileMimeTest`. Total: 171 tests.
 - `CLAUDE.md` — Added "Per-Profile MIME and componentType Filtering" section, updated Adding a New Profile checklist
 - `agents.md` — Updated profile count, key file descriptions, test count, Adding a New ADA Profile steps, added filtering subsection
+
+## 2026-02-14: In-App User Guide Page
+
+**What changed:** Added an in-app User Guide page at `/user-guide` that renders the existing `docs/user-guide.md` using `markdown-it`. The guide is accessible from a nav menu item and a text link on the home page.
+
+**Implementation:**
+- Installed `markdown-it` (runtime) and `@types/markdown-it` (dev) in dspfront
+- Copied `docs/user-guide.md` to `dspfront/src/assets/user-guide.md` so Vite can import it as a raw string (`?raw` suffix)
+- Added `*.md?raw` TypeScript module declaration to `shims.d.ts`
+- Created `cz.user-guide.vue` component with:
+  - `markdown-it` rendering via `v-html`
+  - Custom `heading_open` renderer that generates GitHub-style slug IDs on headings (so TOC anchor links work)
+  - Click handler intercepting `#hash` links to use `scrollIntoView({ behavior: 'smooth' })` (browser native hash navigation doesn't work inside Vuetify's scroll container)
+  - `mounted()` hook for initial hash navigation on direct URL access
+  - Scoped CSS for markdown elements (headings, tables, lists, code, links, blockquotes, hr)
+- Added `/user-guide` route in `routes.ts`
+- Added "User Guide" nav menu item in `App.vue` (after "Resources", with `mdi-book-open-page-variant` icon)
+- Added "For complete instructions..." link on home page between action cards and FAIR section
+
+**Anchor link fix:** Initial deployment had non-working TOC links due to two issues:
+1. `slugify()` was collapsing double hyphens (`--` → `-`), causing mismatches for headings with `&` (e.g., "Account & Settings" → `account--settings`)
+2. Browser hash navigation doesn't scroll inside Vuetify's `v-main` scroll container — fixed with explicit `scrollIntoView()` on click
+
+**Files changed:**
+- `dspfront/package.json` — Added `markdown-it`, `@types/markdown-it`
+- `dspfront/src/assets/user-guide.md` — New (copy of `docs/user-guide.md`)
+- `dspfront/src/components/user-guide/cz.user-guide.vue` — New component
+- `dspfront/src/shims.d.ts` — Added `*.md?raw` module declaration
+- `dspfront/src/routes.ts` — Added import + route
+- `dspfront/src/App.vue` — Added nav menu item
+- `dspfront/src/components/home/cz.home.vue` — Added text link
+
+## 2026-02-14: Digital Ocean Deployment
+
+**What changed:** Deployed the demo instance to a Digital Ocean Droplet at `104.131.83.88`. SSH key access configured for `root` from the development machine.
+
+**Setup:**
+- Generated ed25519 SSH key pair on Windows dev machine (`~/.ssh/id_ed25519`, no passphrase)
+- Added public key to droplet's `~/.ssh/authorized_keys` via DO web console (the forced password reset after DO password reset doesn't work well via SSH terminal — use the DO Droplet Console instead)
+- Repo cloned at `/root/IEDADataSubmission` on the droplet
+
+**Deploy commands:**
+```bash
+ssh root@104.131.83.88 "cd /root/IEDADataSubmission && git pull --recurse-submodules && docker compose -f docker-compose-demo.yml up -d --build && docker exec catalog python manage.py load_profiles"
+```
+
+**Gotcha:** The `dspback` submodule on the droplet may have local Dockerfile edits (e.g., the ADA model codegen line added manually before it was committed upstream). If `git pull --recurse-submodules` fails with "Your local changes would be overwritten", stash the submodule changes first:
+```bash
+ssh root@104.131.83.88 "cd /root/IEDADataSubmission/dspback && git stash && cd /root/IEDADataSubmission && git submodule update --recursive"
+```

@@ -161,6 +161,7 @@ This is the most common extension task. Follow these steps in order:
 | `components/metadata/geodat.ada-select-type.vue` | ADA profile selection page (`/metadata/ada`) — fetches profiles from catalog API |
 | `components/metadata/geodat.ada-profile-form.vue` | Catalog-driven ADA form (`/metadata/ada/:profile`) — fetches schema from catalog API, flattens distribution schema, unwraps encodingFormat arrays, "Save Changes" (local) + "Submit to ADA" (push) buttons, ADA status/DOI display |
 | `components/metadata/geodat.cdif-form.vue` | Catalog-driven CDIF form (`/metadata/cdif`) — fetches schema from catalog API |
+| `components/user-guide/cz.user-guide.vue` | In-app User Guide page (`/user-guide`) — renders `docs/user-guide.md` via markdown-it with anchor link scrolling |
 | `components/metadata/UpdateMetadata.vue` | Update Existing Metadata page — load JSON-LD by DOI, file, or URL; create draft record |
 | `components/bundle/BundleWizard.vue` | ADA Bundle Wizard — 5-step wizard for ZIP bundle upload, introspection, metadata, and push |
 | `components/bundle/MetadataFormStep.vue` | Bundle wizard metadata form — pre-populates from product YAML, files, inspections |
@@ -625,6 +626,20 @@ Four Docker Compose configurations at the repo root:
 Nginx (`nginx/`) reverse proxies `/api/catalog/*` to the Django catalog backend (port 5003), `/api/*` to FastAPI (port 5002), and everything else to the frontend (port 5001). SSL termination happens at nginx (dev/production) or is omitted (demo). The `/api/catalog` location block must appear before `/api` in the nginx config for correct routing.
 
 Environment variables (PostgreSQL credentials, OAuth credentials, JWT secrets) are in `.env` at the repo root. `.env.demo` is a ready-made template for demo deployments — copy it to `.env` and set `DEMO_HOST`/`OUTSIDE_HOST` to your VPS IP or domain.
+
+### Digital Ocean Deployment
+
+The demo instance runs on a Digital Ocean Droplet at `104.131.83.88`. SSH key access is configured for `root`. To deploy updates:
+
+```bash
+ssh root@104.131.83.88 "cd /root/IEDADataSubmission && git pull --recurse-submodules && docker compose -f docker-compose-demo.yml up -d --build && docker exec catalog python manage.py load_profiles"
+```
+
+If the `dspback` submodule has local changes on the droplet (e.g., manual Dockerfile edits), stash them first:
+
+```bash
+ssh root@104.131.83.88 "cd /root/IEDADataSubmission/dspback && git stash && cd /root/IEDADataSubmission && git submodule update --recursive"
+```
 
 ### Demo Deployment
 

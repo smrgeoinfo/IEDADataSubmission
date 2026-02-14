@@ -16,6 +16,7 @@ IEDADataSubmission/
 ├── jsonld/                  # JSON-LD normalization examples
 ├── nginx/                   # Nginx reverse proxy configs
 ├── scripts/                 # Infrastructure scripts (DB init, etc.)
+├── docs/                    # Documentation (user guide)
 ├── docker-compose-dev.yml   # Development stack (backend + nginx)
 ├── docker-compose-demo.yml  # Self-contained demo stack (HTTP, all 5 services)
 ├── docker-compose-upstream.yml  # Full stack from source
@@ -318,6 +319,8 @@ dspfront/src/
 │   │   ├── geodat.ada-select-type.vue   # ADA profile selection page (/metadata/ada)
 │   │   ├── geodat.ada-profile-form.vue  # Catalog-driven ADA form (/metadata/ada/:profile)
 │   │   └── geodat.cdif-form.vue         # Catalog-driven CDIF form (/metadata/cdif)
+│   ├── user-guide/
+│   │   └── cz.user-guide.vue           # In-app User Guide page (/user-guide)
 │   ├── submissions/
 │   │   ├── geodat.submissions.vue       # Submissions page (repo + catalog tabs)
 │   │   └── types.ts                     # EnumRepositoryKeys, IRepository, ISubmission interfaces
@@ -502,6 +505,24 @@ docker compose -f docker-compose-demo.yml up -d --build
 ```
 
 Access the application at `http://<DEMO_HOST>` (default: http://localhost).
+
+#### Digital Ocean Deployment
+
+The demo stack runs on a Digital Ocean Droplet at `104.131.83.88`. To deploy updates:
+
+```bash
+ssh root@104.131.83.88
+cd /root/IEDADataSubmission
+git pull --recurse-submodules
+docker compose -f docker-compose-demo.yml up -d --build
+docker exec catalog python manage.py load_profiles
+```
+
+Or from a local machine with SSH key access:
+
+```bash
+ssh root@104.131.83.88 "cd /root/IEDADataSubmission && git pull --recurse-submodules && docker compose -f docker-compose-demo.yml up -d --build && docker exec catalog python manage.py load_profiles"
+```
 
 Key differences from the dev stack:
 - HTTP only (no SSL certificates needed)
