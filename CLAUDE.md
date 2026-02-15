@@ -41,6 +41,18 @@ docker compose -f docker-compose-demo.yml up -d --build
 
 Push changes: commit in submodule first, push submodule, then commit+push parent.
 
+## Building Block Directory Layout
+
+Inside `BuildingBlockSubmodule/_sources/`:
+
+- `cdifProperties/` — CDIF-specific building blocks: `cdifMandatory`, `cdifOptional`, `cdifDataCube`, `cdifPhysicalMapping`, `cdifTabularData`, `cdifVariableMeasured`
+- `schemaorgProperties/` — schema.org vocabulary building blocks: `action`, `additionalProperty`, `dataDownload`, `definedTerm`, `identifier`, `person`, `organization`, etc.
+- `adaProperties/` — ADA-specific building blocks: `files`, `instrument`, `laboratory`, detail schemas, etc.
+- `profiles/` — Assembled profile schemas (adaProduct, CDIFDiscovery, CDIFxas, technique profiles)
+- `xasProperties/` — XAS-specific building blocks
+- `provProperties/` — Provenance building blocks
+- `qualityProperties/` — Quality measure building blocks
+
 ## Schema Pipeline
 
 ```
