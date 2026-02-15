@@ -297,8 +297,8 @@ To add a new domain-specific CDIF profile (e.g., `CDIFxas`):
 2. **Profile** — Create `BuildingBlockSubmodule/_sources/profiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
    ```yaml
    allOf:
-   - $ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json
-   - $ref: ../../schemaorgProperties/cdifOptional/cdifOptionalSchema.json
+   - $ref: ../../cdifProperties/cdifMandatory/cdifMandatorySchema.json
+   - $ref: ../../cdifProperties/cdifOptional/cdifOptionalSchema.json
    - $ref: ../../xasProperties/xasOptional/xasOptionalSchema.json
    - $ref: ../../xasProperties/xasRequired/xasRequiredSchema.json
    ```
