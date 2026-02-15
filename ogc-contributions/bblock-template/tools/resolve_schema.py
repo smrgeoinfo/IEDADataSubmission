@@ -16,6 +16,8 @@ $ref patterns handled:
   2. Fragment-only:       $ref: '#/$defs/Identifier'
   3. Cross-file fragment: $ref: ../metaMetadata/schema.yaml#/$defs/conformsTo_item
   4. Both YAML and JSON file extensions
+  5. bblocks:// URI:      $ref: bblocks://ogc.geo.features.feature
+                          (resolved via bblocks-config.yaml identifier-prefix)
 
 Usage:
     python tools/resolve_schema.py --file _sources/myFeature/schema.yaml
@@ -164,8 +166,16 @@ def _deep_merge_inner(base: dict, overlay: dict, in_properties: bool) -> dict:
 # Core resolution
 # ---------------------------------------------------------------------------
 
-def resolve_file(path: Path, seen: set) -> dict:
-    """Load a YAML or JSON schema file and resolve all $ref within it."""
+def resolve_file(path: Path, seen: set, bblock_index: dict = None, keep_defs: bool = False) -> dict:
+    """Load a YAML or JSON schema file and resolve all $ref within it.
+
+    Parameters
+    ----------
+    keep_defs : bool
+        If True, preserve the resolved ``$defs`` dict in the output.  This is
+        needed when the caller will apply a JSON Pointer fragment that targets
+        ``$defs`` entries (e.g., ``#/$defs/MultipleOrObjectOrNull``).
+    """
     canonical = path.resolve()
     if canonical in seen:
         return {"$comment": f"circular ref to {canonical}"}
@@ -186,34 +196,35 @@ def resolve_file(path: Path, seen: set) -> dict:
     if "$defs" in schema:
         raw_defs = schema["$defs"]
         for def_name, def_schema in raw_defs.items():
-            defs[def_name] = resolve_node(def_schema, canonical.parent, {}, seen)
+            defs[def_name] = resolve_node(def_schema, canonical.parent, {}, seen, bblock_index)
         # Pass 2: re-resolve with full defs.  Because pass 1 may have left
         # "$comment" placeholders instead of the resolved content, we also
         # inline those placeholders by re-walking the defs.
         for def_name in list(defs.keys()):
-            defs[def_name] = _inline_unresolved_defs(defs[def_name], defs, canonical.parent, seen)
+            defs[def_name] = _inline_unresolved_defs(defs[def_name], defs, canonical.parent, seen, bblock_index)
 
     # Walk and resolve the entire schema
-    resolved = resolve_node(schema, canonical.parent, defs, seen)
+    resolved = resolve_node(schema, canonical.parent, defs, seen, bblock_index)
 
-    # Remove $defs from final output (they've been inlined)
-    if isinstance(resolved, dict):
+    # Remove $defs from final output (they've been inlined), unless the
+    # caller needs them for fragment resolution.
+    if isinstance(resolved, dict) and not keep_defs:
         resolved.pop("$defs", None)
 
     return resolved
 
 
-def resolve_node(node: Any, base_dir: Path, defs: dict, seen: set) -> Any:
+def resolve_node(node: Any, base_dir: Path, defs: dict, seen: set, bblock_index: dict = None) -> Any:
     """Recursively resolve $ref in a schema node."""
     if isinstance(node, dict):
         if "$ref" in node:
             ref = node["$ref"]
-            resolved = _resolve_ref(ref, base_dir, defs, seen)
+            resolved = _resolve_ref(ref, base_dir, defs, seen, bblock_index)
 
             # If $ref has sibling keys, merge resolved with siblings
             siblings = {k: v for k, v in node.items() if k != "$ref"}
             if siblings:
-                siblings = resolve_node(siblings, base_dir, defs, seen)
+                siblings = resolve_node(siblings, base_dir, defs, seen, bblock_index)
                 if isinstance(resolved, dict):
                     resolved = deep_merge(resolved, siblings)
                 # If resolved is not a dict (unlikely), siblings are lost
@@ -222,16 +233,16 @@ def resolve_node(node: Any, base_dir: Path, defs: dict, seen: set) -> Any:
         # Recurse into all dict values
         result = {}
         for k, v in node.items():
-            result[k] = resolve_node(v, base_dir, defs, seen)
+            result[k] = resolve_node(v, base_dir, defs, seen, bblock_index)
         return result
 
     elif isinstance(node, list):
-        return [resolve_node(item, base_dir, defs, seen) for item in node]
+        return [resolve_node(item, base_dir, defs, seen, bblock_index) for item in node]
 
     return node
 
 
-def _inline_unresolved_defs(node: Any, defs: dict, base_dir: Path, seen: set) -> Any:
+def _inline_unresolved_defs(node: Any, defs: dict, base_dir: Path, seen: set, bblock_index: dict = None) -> Any:
     """
     Walk *node* and replace ``{"$comment": "unresolved fragment ref: #/$defs/X"}``
     placeholders with the actual resolved content from *defs*.
@@ -248,23 +259,23 @@ def _inline_unresolved_defs(node: Any, defs: dict, base_dir: Path, seen: set) ->
         # Also resolve any leftover $ref
         if "$ref" in node:
             ref = node["$ref"]
-            resolved = _resolve_ref(ref, base_dir, defs, seen)
+            resolved = _resolve_ref(ref, base_dir, defs, seen, bblock_index)
             siblings = {k: v for k, v in node.items() if k != "$ref"}
             if siblings:
-                siblings = _inline_unresolved_defs(siblings, defs, base_dir, seen)
+                siblings = _inline_unresolved_defs(siblings, defs, base_dir, seen, bblock_index)
                 if isinstance(resolved, dict):
                     resolved = deep_merge(resolved, siblings)
             return resolved
         result = {}
         for k, v in node.items():
-            result[k] = _inline_unresolved_defs(v, defs, base_dir, seen)
+            result[k] = _inline_unresolved_defs(v, defs, base_dir, seen, bblock_index)
         return result
     elif isinstance(node, list):
-        return [_inline_unresolved_defs(item, defs, base_dir, seen) for item in node]
+        return [_inline_unresolved_defs(item, defs, base_dir, seen, bblock_index) for item in node]
     return node
 
 
-def _resolve_ref(ref: str, base_dir: Path, defs: dict, seen: set) -> Any:
+def _resolve_ref(ref: str, base_dir: Path, defs: dict, seen: set, bblock_index: dict = None) -> Any:
     """Parse and resolve a $ref string."""
     if ref.startswith("#/"):
         # Fragment-only ref (e.g., #/$defs/Identifier)
@@ -276,6 +287,12 @@ def _resolve_ref(ref: str, base_dir: Path, defs: dict, seen: set) -> Any:
         # Fall through: shouldn't happen if $defs were resolved, but handle gracefully
         return {"$comment": f"unresolved fragment ref: {ref}"}
 
+    # bblocks:// or bblocks: URI scheme
+    if ref.startswith("bblocks:"):
+        if bblock_index:
+            return _resolve_bblocks_ref(ref, bblock_index, seen)
+        return {"$comment": f"bblocks ref (no index available): {ref}"}
+
     # File ref, possibly with fragment
     if "#" in ref:
         file_part, fragment = ref.split("#", 1)
@@ -286,7 +303,8 @@ def _resolve_ref(ref: str, base_dir: Path, defs: dict, seen: set) -> Any:
     if not file_path.exists():
         return {"$comment": f"file not found: {file_path}"}
 
-    resolved = resolve_file(file_path, seen)
+    # When a fragment is present, keep $defs so the pointer can reach them
+    resolved = resolve_file(file_path, seen, bblock_index, keep_defs=bool(fragment))
 
     if fragment:
         try:
@@ -294,7 +312,10 @@ def _resolve_ref(ref: str, base_dir: Path, defs: dict, seen: set) -> Any:
         except KeyError as e:
             return {"$comment": f"could not resolve fragment {fragment} in {file_path}: {e}"}
         # The fragment result might itself contain refs -- resolve them
-        resolved = resolve_node(resolved, file_path.parent, {}, seen)
+        resolved = resolve_node(resolved, file_path.parent, {}, seen, bblock_index)
+        # Strip $defs if the extracted fragment carried them along
+        if isinstance(resolved, dict):
+            resolved.pop("$defs", None)
 
     return resolved
 
@@ -390,6 +411,97 @@ def _detect_sources_dir() -> Path:
 
 
 # ---------------------------------------------------------------------------
+# bblocks:// URI resolution
+# ---------------------------------------------------------------------------
+
+def _build_bblock_index(sources_dir: Path) -> dict:
+    """Build a mapping from bblocks identifier to schema file path.
+
+    Reads ``bblocks-config.yaml`` from the parent of *sources_dir* to obtain
+    the ``identifier-prefix`` (e.g., ``ogc.``).  Then scans for ``bblock.json``
+    files and derives each building block's full identifier from its path
+    relative to *sources_dir*.
+
+    Returns a dict mapping identifier strings to resolved Path objects, e.g.::
+
+        {"ogc.geo.features.feature": Path(".../geo/features/feature/schema.yaml")}
+
+    Returns an empty dict if no config or no building blocks are found.
+    """
+    # Look for bblocks-config.yaml in the repo root (parent of sources dir)
+    config_path = sources_dir.parent / "bblocks-config.yaml"
+    if not config_path.exists():
+        return {}
+
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+    prefix = config.get("identifier-prefix", "")
+
+    index = {}
+    for bblock_json in sorted(sources_dir.rglob("bblock.json")):
+        bblock_dir = bblock_json.parent
+        # Derive identifier from directory path relative to sources_dir
+        rel = bblock_dir.relative_to(sources_dir)
+        # Convert path separators to dots: geo/features/feature -> geo.features.feature
+        identifier = prefix + ".".join(rel.parts)
+
+        # Find the schema file
+        schema_yaml = bblock_dir / "schema.yaml"
+        if schema_yaml.exists():
+            index[identifier] = schema_yaml.resolve()
+            continue
+        schema_json = bblock_dir / "schema.json"
+        if schema_json.exists():
+            index[identifier] = schema_json.resolve()
+
+    return index
+
+
+def _resolve_bblocks_ref(ref: str, bblock_index: dict, seen: set) -> Any:
+    """Resolve a ``bblocks://`` or ``bblocks:`` URI reference.
+
+    The ref format is ``bblocks://identifier`` or ``bblocks:identifier``,
+    optionally followed by ``#/json/pointer``.
+    """
+    # Strip the bblocks:// or bblocks: prefix
+    if ref.startswith("bblocks://"):
+        remainder = ref[len("bblocks://"):]
+    elif ref.startswith("bblocks:"):
+        remainder = ref[len("bblocks:"):]
+    else:
+        return {"$comment": f"not a bblocks ref: {ref}"}
+
+    # Split off any fragment
+    if "#" in remainder:
+        identifier, fragment = remainder.split("#", 1)
+    else:
+        identifier, fragment = remainder, None
+
+    if identifier not in bblock_index:
+        return {"$comment": f"bblocks ref not found in local index: {ref}"}
+
+    schema_path = bblock_index[identifier]
+    # When a fragment is present, keep $defs so the pointer can reach them
+    resolved = resolve_file(schema_path, seen, bblock_index, keep_defs=bool(fragment))
+
+    if fragment:
+        try:
+            resolved = resolve_fragment(resolved, fragment)
+        except KeyError as e:
+            return {"$comment": f"could not resolve fragment {fragment} in {ref}: {e}"}
+        resolved = resolve_node(resolved, schema_path.parent, {}, seen, bblock_index)
+        # Strip $defs if the extracted fragment carried them along
+        if isinstance(resolved, dict):
+            resolved.pop("$defs", None)
+
+    return resolved
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -443,6 +555,11 @@ def main():
         if not schema_path.exists():
             print(f"ERROR: File not found: {schema_path}", file=sys.stderr)
             sys.exit(1)
+        # Try to detect sources_dir for bblocks:// resolution even with --file
+        sources_dir = args.sources_dir
+        if sources_dir is None:
+            sources_dir = _detect_sources_dir()
+        sources_dir = sources_dir.resolve()
     else:
         sources_dir = args.sources_dir or _detect_sources_dir()
         sources_dir = sources_dir.resolve()
@@ -451,10 +568,17 @@ def main():
             sys.exit(1)
         schema_path = find_bblock_schema(args.bblock, sources_dir)
 
+    # Build bblocks:// index for cross-building-block references
+    bblock_index = {}
+    if sources_dir.is_dir():
+        bblock_index = _build_bblock_index(sources_dir)
+        if bblock_index:
+            print(f"Indexed {len(bblock_index)} building block(s) for bblocks:// resolution", file=sys.stderr)
+
     print(f"Resolving: {schema_path}", file=sys.stderr)
 
     # Resolve all $ref recursively
-    resolved = resolve_file(schema_path, seen=set())
+    resolved = resolve_file(schema_path, seen=set(), bblock_index=bblock_index)
 
     # Strip metadata keys (unless --keep-metadata)
     if not args.keep_metadata:

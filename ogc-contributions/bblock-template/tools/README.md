@@ -28,6 +28,7 @@ Recursively resolves ALL `$ref` references from modular YAML/JSON source schemas
 2. **Fragment-only:** `$ref: '#/$defs/Identifier'`
 3. **Cross-file fragment:** `$ref: ../metaMetadata/schema.yaml#/$defs/conformsTo_item`
 4. **Both YAML and JSON** file extensions
+5. **`bblocks://` URI:** `$ref: bblocks://ogc.geo.features.feature` — cross-building-block references using OGC's `bblocks://` (or `bblocks:`) URI scheme, resolved via the `identifier-prefix` in `bblocks-config.yaml`
 
 ### Usage
 
@@ -71,6 +72,18 @@ When using `--bblock`, the tool searches for the schema in this order:
 2. `{sources_dir}/{name}/schema.json` (flat layout, JSON)
 3. `{sources_dir}/**/{name}/schema.yaml` (nested layout, filtered by `bblock.json` presence)
 4. `{sources_dir}/**/{name}/schema.json` (nested layout, JSON fallback)
+
+### `bblocks://` cross-building-block references
+
+Many OGC building block schemas reference other building blocks using the `bblocks://` URI scheme (e.g., `$ref: bblocks://ogc.geo.common.data_types.bounding_box`). The resolver handles these automatically by:
+
+1. Reading `bblocks-config.yaml` from the repo root (parent of the sources directory) to get the `identifier-prefix` (e.g., `ogc.`)
+2. Scanning all `bblock.json` files to build an index mapping identifiers to schema paths
+3. Resolving `bblocks://` refs by looking up the identifier in the index
+
+This works for all local building blocks within the same repository. References to building blocks from imported registries (external repos) will produce a `$comment` noting they could not be resolved locally.
+
+Fragment refs are also supported: `$ref: bblocks://ogc.geo.features.feature#/$defs/Something`
 
 ### Example: validate data against resolved schema
 
@@ -146,6 +159,7 @@ For each building block directory, the tool looks for the companion JSON schema 
 | **Input** | Full repo build | Single schema file or building block name |
 | **Output** | `build/annotated/` with remote `$ref` URLs | Fully-resolved, self-contained JSON Schema |
 | **Remote refs** | Rewrites to absolute URLs | Resolves to inline definitions |
+| **`bblocks://` refs** | Resolved via registry imports | Resolved locally via `bblocks-config.yaml` index |
 | **Use case** | CI/CD pipeline, publishing | Local validation, tooling integration, inspection |
 
 ## Installation
