@@ -201,3 +201,13 @@ Draft records (`status: 'draft'`) skip JSON Schema validation in `RecordSerializ
 The record list API (`RecordListSerializer`) exposes `ada_status` and `ada_doi` fields from `AdaRecordLink`. The frontend shows ADA status/DOI in the profile form (alert banner) and submissions list (chips + "Push to ADA" button).
 
 Re-import versioning in `create()` (for DOI lookups) is unchanged.
+
+## Upstream OGC Contributions
+
+Generalized versions of `resolve_schema.py` and `compare_schemas.py` (plus a bblocks-viewer feature) are staged in `ogc-contributions/bblock-template/tools/` and submitted as PRs:
+
+| PR | Target | Status |
+|---|---|---|
+| [opengeospatial/bblock-template#8](https://github.com/opengeospatial/bblock-template/pull/8) | Schema tools in bblock-template | Open |
+| [opengeospatial/bblocks-postprocess#62](https://github.com/opengeospatial/bblocks-postprocess/pull/62) | Schema tools in bblocks-postprocess | Open |
+| [ogcincubator/bblocks-viewer#6](https://github.com/ogcincubator/bblocks-viewer/pull/6) | Resolved (JSON) button in viewer | Open |
