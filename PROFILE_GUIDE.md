@@ -160,7 +160,7 @@ allOf:
               $ref: '#/$defs/AdditionalProperty'    # Reference to a local $def
 $defs:
   CdifMandatory:
-    $ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json   # Relative $ref to another BB
+    $ref: ../../cdifProperties/cdifMandatory/cdifMandatorySchema.json   # Relative $ref to another BB
   AdditionalProperty:
     $ref: ../../schemaorgProperties/additionalProperty/additionalPropertySchema.json
 ```
@@ -231,8 +231,8 @@ description: >-
   CDIF discovery metadata profile with XAS-specific extensions for
   X-ray absorption spectroscopy datasets.
 allOf:
-- $ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json
-- $ref: ../../schemaorgProperties/cdifOptional/cdifOptionalSchema.json
+- $ref: ../../cdifProperties/cdifMandatory/cdifMandatorySchema.json
+- $ref: ../../cdifProperties/cdifOptional/cdifOptionalSchema.json
 - $ref: ../../xasProperties/xasOptional/xasOptionalSchema.json
 - $ref: ../../xasProperties/xasRequired/xasRequiredSchema.json
 ```
@@ -715,7 +715,7 @@ prov:wasGeneratedBy:
 When referencing another building block, use relative `$ref` paths to the `.json` schema file:
 
 ```yaml
-$ref: ../../schemaorgProperties/cdifMandatory/cdifMandatorySchema.json
+$ref: ../../cdifProperties/cdifMandatory/cdifMandatorySchema.json
 ```
 
 ### UISchema scopes must include namespace prefix
