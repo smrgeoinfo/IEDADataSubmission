@@ -11,6 +11,12 @@ IEDA Data Submission Portal — monorepo with FastAPI backend (`dspback/`), Djan
 cd BuildingBlockSubmodule
 python tools/resolve_schema.py <ProfileName> --flatten-allof -o _sources/profiles/<ProfileName>/resolvedSchema.json
 
+# Resolve all building blocks with external $refs (writes resolvedSchema.json next to each schema.yaml)
+python tools/resolve_schema.py --all
+
+# Resolve an arbitrary schema file
+python tools/resolve_schema.py --file _sources/cdifProperties/cdifDataCube/schema.yaml -o _sources/cdifProperties/cdifDataCube/resolvedSchema.json
+
 # Convert to JSON Forms
 python tools/convert_for_jsonforms.py --profile <ProfileName>
 python tools/convert_for_jsonforms.py --all
@@ -59,7 +65,7 @@ Inside `BuildingBlockSubmodule/_sources/`:
 schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json (Draft 7)
 ```
 
-Building blocks have parallel files: `schema.yaml` (source) and `{name}Schema.json`. Keep them in sync — run `compare_schemas.py` after editing.
+Building blocks have parallel files: `schema.yaml` (source) and `{name}Schema.json`. Keep them in sync — run `compare_schemas.py` after editing. Any building block with external `$ref`s should have a `resolvedSchema.json` — run `resolve_schema.py --all` to regenerate them all.
 
 ## Profiles (38 total)
 
