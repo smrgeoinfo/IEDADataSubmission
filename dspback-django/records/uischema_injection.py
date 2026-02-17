@@ -129,7 +129,7 @@ IMAGE_COMPONENT_TYPES = [
     "ada:XANESImageStack", "ada:XANESStackOverviewImage",
     "ada:XRDDiffractionPattern", "ada:ShapeModelImage",
     # imageMap building block (additional unique types)
-    "ada:basemap", "ada:supplementalBasemap", "ada:L2MSOverviewImage",
+    "ada:L2MSOverviewImage",
     "ada:NanoIRMap", "ada:SEMEBSDGrainImageMap", "ada:SEMHRCLMap",
     "ada:SEMImageMap", "ada:NanoSIMSMap", "ada:XANESimage", "ada:VNMIROverviewImage",
     "ada:EMPAQEATabular", "ada:EMPAImageCollection",
@@ -191,22 +191,30 @@ DATACUBE_COMPONENT_TYPES = [
 ]
 
 # document building block — shown when DOCUMENT_MIMES selected
+# Supplement types (calibrationFile, contextVideo, logFile, etc.) moved to
+# GENERIC_COMPONENT_TYPES so they appear in every category dropdown.
 DOCUMENT_COMPONENT_TYPES = [
     "ada:ARGTDocument",
-    "ada:calibrationFile", "ada:contextVideo",
-    "ada:logFile", "ada:methodDescription",
-    "ada:peaks", "ada:processingDescription",
+    "ada:peaks",
     "ada:QRISCalibrationFile",
-    "ada:samplePreparation", "ada:shapefiles",
     # additional document types
     "ada:SLSShapeModel", "ada:SLSPartialScan", "ada:MCICPMSRaw",
 ]
 
-# Generic types available in every category dropdown
+# Generic types available in every category dropdown.
+# Includes all 22 supplement types from the Components worksheet of
+# ADA-AnalyticalMethodsAndAttributes.xlsx, plus legacy building-block types
+# (annotatedProduct, visImage) for backward compatibility.
 GENERIC_COMPONENT_TYPES = [
-    "ada:analysisLocation", "ada:annotatedProduct", "ada:contextPhotography",
-    "ada:areaOfInterest", "ada:instrumentMetadata", "ada:other",
-    "ada:plot", "ada:quickLook", "ada:report", "ada:visImage",
+    "ada:analysisLocation", "ada:annotatedImage", "ada:areaOfInterest",
+    "ada:basemap", "ada:calibrationFile", "ada:code",
+    "ada:contextPhotography", "ada:contextVideo", "ada:inputFile",
+    "ada:instrumentMetadata", "ada:logFile", "ada:methodDescription",
+    "ada:other", "ada:plot", "ada:processingMethod", "ada:quickLook",
+    "ada:report", "ada:samplePreparation", "ada:shapefile",
+    "ada:supplementalBasemap", "ada:supplementaryImage", "ada:worldFile",
+    # Legacy types from building block schemas (not in supplement list)
+    "ada:annotatedProduct", "ada:visImage",
 ]
 
 # ---------------------------------------------------------------------------
@@ -236,7 +244,7 @@ PROFILE_COMPONENT_TYPES = {
         "ada:VNMIRSpectralMap", "ada:VNMIRSpectraPlot",
     ],
     # --- 31 generated profiles (from generate_profiles.py PROFILES) ---
-    "adaARGT": ["ada:ARGTDocument", "ada:ARGTCollection", "ada:calibrationFile"],
+    "adaARGT": ["ada:ARGTDocument", "ada:ARGTCollection"],
     "adaDSC": ["ada:DSCHeatTabular", "ada:DSCResultsTabular"],
     "adaEAIRMS": ["ada:EAIRMSCollection"],
     "adaICPOES": [
