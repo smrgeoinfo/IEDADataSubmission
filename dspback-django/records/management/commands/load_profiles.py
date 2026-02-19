@@ -48,11 +48,23 @@ class Command(BaseCommand):
             return
 
         # First pass: create/update all profiles
+        # Profiles live in subdirectories (adaProfiles/, cdifProfiles/)
         loaded = []
-        for subdir in sorted(profiles_dir.iterdir()):
-            if not subdir.is_dir():
+        profile_dirs = []
+        for child in sorted(profiles_dir.iterdir()):
+            if not child.is_dir():
                 continue
+            # Check if this is a category subdirectory (contains profile dirs)
+            # or a direct profile directory (contains schema.json)
+            if (child / "schema.json").exists():
+                profile_dirs.append(child)
+            else:
+                # Category subdirectory — collect its children
+                for subchild in sorted(child.iterdir()):
+                    if subchild.is_dir():
+                        profile_dirs.append(subchild)
 
+        for subdir in profile_dirs:
             schema_path = subdir / "schema.json"
             if not schema_path.exists():
                 self.stderr.write(self.style.WARNING(f"Skipping {subdir.name}: no schema.json"))

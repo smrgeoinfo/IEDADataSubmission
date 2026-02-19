@@ -255,15 +255,15 @@ The same flow applies to CDIF via `geodat.cdif-form.vue` at `/metadata/cdif`.
 schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonforms.py → schema.json
 ```
 
-**39 profiles**: `adaProduct` (base) + 35 technique-specific ADA profiles (original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`; plus 31 generated profiles), `CDIFDiscovery`, `CDIFDataDescription` (CDIF distribution-extensions profile for dataCube, tabularData, WebAPI), `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` (human-readable product-type labels only, no `ada:` URIs) and `schema:measurementTechnique`, plus per-profile `componentType/@type` constraints. File-type constraints (image, tabular, dataCube, document) come from the shared `files/schema.yaml` building block via `allOf` composition. Each technique profile has per-profile MIME filtering and componentType dropdown filtering derived from `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
+**40 profiles**: `adaProduct` (base) + 35 technique-specific ADA profiles (original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`; plus 31 generated profiles), `CDIFDiscovery`, `CDIFDataDescription` (CDIF distribution-extensions profile for dataCube, tabularData, WebAPI), `CDIFxas` (CDIF XAS profile). ADA technique profiles add `enum` constraints on `schema:additionalType` (human-readable product-type labels only, no `ada:` URIs) and `schema:measurementTechnique`, plus per-profile `componentType/@type` constraints. File-type constraints (image, tabular, dataCube, document) come from the shared `files/schema.yaml` building block via `allOf` composition. Each technique profile has per-profile MIME filtering and componentType dropdown filtering derived from `PROFILE_COMPONENT_TYPES` in `uischema_injection.py`. CDIF profiles compose `cdifMandatory` + `cdifOptional` with domain-specific building blocks (e.g., `xasRequired` + `xasOptional` for XAS).
 
 **Key files**:
 - `BuildingBlockSubmodule/tools/resolve_schema.py` — Schema resolver (YAML → resolvedSchema.json)
 - `BuildingBlockSubmodule/tools/convert_for_jsonforms.py` — JSON Forms converter (resolvedSchema.json → schema.json)
-- `BuildingBlockSubmodule/_sources/profiles/*/resolvedSchema.json` — Fully resolved Draft 2020-12 schemas
-- `BuildingBlockSubmodule/_sources/jsonforms/profiles/*/uischema.json` — Hand-crafted UI layouts
-- `BuildingBlockSubmodule/_sources/jsonforms/profiles/*/defaults.json` — Default values
-- `BuildingBlockSubmodule/build/jsonforms/profiles/*/schema.json` — Generated Draft 7 schemas
+- `BuildingBlockSubmodule/_sources/profiles/{adaProfiles,cdifProfiles}/*/resolvedSchema.json` — Fully resolved Draft 2020-12 schemas
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/{adaProfiles,cdifProfiles}/*/uischema.json` — Hand-crafted UI layouts
+- `BuildingBlockSubmodule/_sources/jsonforms/profiles/{adaProfiles,cdifProfiles}/*/defaults.json` — Default values
+- `BuildingBlockSubmodule/build/jsonforms/profiles/{adaProfiles,cdifProfiles}/*/schema.json` — Generated Draft 7 schemas
 - `BuildingBlockSubmodule/.github/workflows/generate-jsonforms.yml` — CI workflow
 - `dspfront/src/components/metadata/geodat.ada-profile-form.vue` — ADA form component
 - `dspfront/src/components/metadata/geodat.cdif-form.vue` — CDIF form component
@@ -275,13 +275,13 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 To add a new technique profile (e.g., `adaXRF`):
 
-1. **OGC Building Block** — Create `BuildingBlockSubmodule/_sources/profiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add:
+1. **OGC Building Block** — Create `BuildingBlockSubmodule/_sources/profiles/adaProfiles/adaXRF/` with `bblock.json`, `schema.yaml`, `context.jsonld`, `description.md`. The `schema.yaml` should use `allOf` to extend `adaProduct` and add:
    - `schema:additionalType` constraint with `contains`/`enum` for valid component types
    - `schema:measurementTechnique` constraint (if needed)
    - `fileDetail` constraint with `anyOf` listing only the file types valid for this technique (e.g., `$ref: ../../adaProperties/tabularData/schema.yaml`)
    - Copy from an existing technique profile (e.g., `adaEMPA`).
-2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaXRF/resolvedSchema.json` from the `BuildingBlockSubmodule` directory.
-3. **JSON Forms static files** — Create `BuildingBlockSubmodule/_sources/jsonforms/profiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
+2. **Resolve schema** — Run `python tools/resolve_schema.py adaXRF --flatten-allof -o _sources/profiles/adaProfiles/adaXRF/resolvedSchema.json` from the `BuildingBlockSubmodule` directory.
+3. **JSON Forms static files** — Create `BuildingBlockSubmodule/_sources/jsonforms/profiles/adaProfiles/adaXRF/` with `uischema.json` and `defaults.json`. Copy from an existing technique profile and adjust defaults.
 4. **Schema conversion** — Add `'adaXRF'` to the `TECHNIQUE_PROFILES` list in `BuildingBlockSubmodule/tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --all`.
 5. **MIME / componentType filtering** — Add an entry to `PROFILE_COMPONENT_TYPES` in `dspback-django/records/uischema_injection.py` listing the profile's `ada:`-prefixed component types. MIME type filtering and componentType dropdown filtering are both auto-derived from this dict. Also add any new component types to the appropriate global category list (`IMAGE_COMPONENT_TYPES`, `TABULAR_COMPONENT_TYPES`, `DATACUBE_COMPONENT_TYPES`, `DOCUMENT_COMPONENT_TYPES`).
 6. **Measurement details** *(optional)* — If the technique has a dedicated detail building block (e.g., `detailXRF/`) with measurement properties, add an entry to `PROFILE_MEASUREMENT_CONTROLS` in `dspback-django/records/uischema_injection.py`. Use the `_ct_ctrl(prop, label)` helper for controls. The measurement group is automatically inserted after each ComponentType dropdown in the form.
@@ -294,16 +294,16 @@ To add a new technique profile (e.g., `adaXRF`):
 To add a new domain-specific CDIF profile (e.g., `CDIFxas`):
 
 1. **Domain building blocks** — Create building blocks under `BuildingBlockSubmodule/_sources/xasProperties/` (or similar domain directory). Each BB has `bblock.json`, `schema.yaml`, `{name}Schema.json`. The YAML schema defines constraints using `allOf`/`contains` patterns. Keep a parallel JSON schema (`{name}Schema.json`) for direct use.
-2. **Profile** — Create `BuildingBlockSubmodule/_sources/profiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
+2. **Profile** — Create `BuildingBlockSubmodule/_sources/profiles/cdifProfiles/CDIFxas/` with `schema.yaml`. The schema uses `allOf` to compose `cdifMandatory`, `cdifOptional`, and domain-specific building blocks:
    ```yaml
    allOf:
-   - $ref: ../../cdifProperties/cdifMandatory/cdifMandatorySchema.json
-   - $ref: ../../cdifProperties/cdifOptional/cdifOptionalSchema.json
-   - $ref: ../../xasProperties/xasOptional/xasOptionalSchema.json
-   - $ref: ../../xasProperties/xasRequired/xasRequiredSchema.json
+   - $ref: ../../../cdifProperties/cdifMandatory/schema.yaml
+   - $ref: ../../../cdifProperties/cdifOptional/schema.yaml
+   - $ref: ../../../xasProperties/xasOptional/schema.yaml
+   - $ref: ../../../xasProperties/xasRequired/schema.yaml
    ```
-3. **Resolve schema** — Run `python tools/resolve_schema.py CDIFxas --flatten-allof -o _sources/profiles/CDIFxas/resolvedSchema.json`.
-4. **JSON Forms static files** — Create `_sources/jsonforms/profiles/CDIFxas/` with `uischema.json` and `defaults.json`. The uischema defines tab layout; defaults provide `@context` with domain namespaces and pre-populated values (e.g., measurement technique for XAS).
+3. **Resolve schema** — Run `python tools/resolve_schema.py CDIFxas --flatten-allof -o _sources/profiles/cdifProfiles/CDIFxas/resolvedSchema.json`.
+4. **JSON Forms static files** — Create `_sources/jsonforms/profiles/cdifProfiles/CDIFxas/` with `uischema.json` and `defaults.json`. The uischema defines tab layout; defaults provide `@context` with domain namespaces and pre-populated values (e.g., measurement technique for XAS).
 5. **Schema conversion** — Add the profile name to `CDIF_PROFILES` in `tools/convert_for_jsonforms.py`, then run `python tools/convert_for_jsonforms.py --profile CDIFxas`.
 6. **Load profile** — Run `docker exec catalog python manage.py load_profiles`.
 7. **Frontend** — CDIF profiles with names starting with `CDIF` (excluding `CDIFDiscovery`) are auto-discovered by `ada-select-type.vue` and shown in the "CDIF Profiles" section. Add the profile to `profileNames` in `geodat.ada-profile-form.vue` and add i18n strings in `messages.ts`.

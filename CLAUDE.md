@@ -9,7 +9,7 @@ IEDA Data Submission Portal — monorepo with FastAPI backend (`dspback/`), Djan
 ```bash
 # Resolve a building block schema
 cd BuildingBlockSubmodule
-python tools/resolve_schema.py <ProfileName> --flatten-allof -o _sources/profiles/<ProfileName>/resolvedSchema.json
+python tools/resolve_schema.py <ProfileName> --flatten-allof -o _sources/profiles/adaProfiles/<ProfileName>/resolvedSchema.json
 
 # Resolve all building blocks with external $refs (writes resolvedSchema.json next to each schema.yaml)
 python tools/resolve_schema.py --all
@@ -54,7 +54,9 @@ Inside `BuildingBlockSubmodule/_sources/`:
 - `cdifProperties/` — CDIF-specific building blocks: `cdifMandatory`, `cdifOptional`, `cdifDataCube`, `cdifPhysicalMapping`, `cdifTabularData`, `cdifVariableMeasured`
 - `schemaorgProperties/` — schema.org vocabulary building blocks: `action`, `additionalProperty`, `dataDownload`, `definedTerm`, `identifier`, `person`, `organization`, etc.
 - `adaProperties/` — ADA-specific building blocks: `files`, `instrument`, `laboratory`, detail schemas, etc.
-- `profiles/` — Assembled profile schemas (adaProduct, CDIFDiscovery, CDIFDataDescription, CDIFxas, technique profiles)
+- `profiles/` — Assembled profile schemas, organized into subdirectories:
+  - `adaProfiles/` — 36 ADA profiles (adaProduct base + 35 technique-specific profiles)
+  - `cdifProfiles/` — 4 CDIF profiles (CDIFDiscovery, CDIFDataDescription, CDIFcomplete, CDIFxas)
 - `xasProperties/` — XAS-specific building blocks
 - `provProperties/` — Provenance building blocks
 - `qualityProperties/` — Quality measure building blocks
@@ -67,16 +69,16 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 Building blocks have parallel files: `schema.yaml` (source) and `{name}Schema.json`. Keep them in sync — run `compare_schemas.py` after editing. Any building block with external `$ref`s should have a `resolvedSchema.json` — run `resolve_schema.py --all` to regenerate them all.
 
-## Profiles (39 total)
+## Profiles (40 total)
 
 - **ADA** (36): `adaProduct` (base) + 35 technique-specific profiles
   - Original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`
   - Generated 31: `adaAIVA`, `adaAMS`, `adaARGT`, `adaDSC`, `adaEAIRMS`, `adaFTICRMS`, `adaGCMS`, `adaGPYC`, `adaIC`, `adaICPOES`, `adaL2MS`, `adaLAF`, `adaLCMS`, `adaLIT`, `adaNGNSMS`, `adaNanoIR`, `adaNanoSIMS`, `adaPSFD`, `adaQRIS`, `adaRAMAN`, `adaRITOFNGMS`, `adaSEM`, `adaSIMS`, `adaSLS`, `adaSVRUEC`, `adaTEM`, `adaToFSIMS`, `adaUVFM`, `adaVLM`, `adaXANES`, `adaXCT`
-- **CDIF** (3): `CDIFDiscovery`, `CDIFDataDescription`, `CDIFxas`
+- **CDIF** (4): `CDIFDiscovery`, `CDIFDataDescription`, `CDIFcomplete`, `CDIFxas`
 
 ## Profile Generator
 
-`tools/generate_profiles.py` is a data-driven generator that creates all technique profile building blocks from a single `PROFILES` config dict. Each profile gets: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`, `examples.yaml`.
+`tools/generate_profiles.py` is a data-driven generator that creates all technique profile building blocks from a single `PROFILES` config dict. Each profile gets: `schema.yaml`, `bblock.json`, `context.jsonld`, `description.md`, `examples.yaml`. Output is written to `_sources/profiles/adaProfiles/{profileName}/`.
 
 ```bash
 # Generate all profiles
@@ -94,13 +96,13 @@ The generator produces technique profile schemas that constrain `schema:addition
 ## Adding a New Profile
 
 For **ADA technique profiles**, add an entry to `PROFILES` in `generate_profiles.py` and re-run the generator. Then:
-1. Run `generate_profiles.py` to create the building block directory
+1. Run `generate_profiles.py` to create the building block directory under `_sources/profiles/adaProfiles/`
 2. Run `resolve_schema.py` to produce `resolvedSchema.json`
 3. Add to `TERMCODE_TO_PROFILE` in `update_conformsto.py`, `validate_instance.py`, and `yaml_to_jsonld.py`
 4. Add to `ADA_PROFILES` in `convert_for_jsonforms.py`
 5. Add to `KNOWN_PROFILES` in `validate_instance.py`
 6. Add entry to `PROFILE_COMPONENT_TYPES` in `uischema_injection.py` (MIME filtering and componentType dropdowns are auto-derived from this dict)
-7. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/` (if UI form needed)
+7. Create `uischema.json` + `defaults.json` in `_sources/jsonforms/profiles/adaProfiles/` (if UI form needed)
 8. Add `profileNames` entry in `geodat.ada-profile-form.vue` (if UI form needed)
 9. Add i18n strings in `messages.ts` (if UI form needed)
 10. `docker exec catalog python manage.py load_profiles`
