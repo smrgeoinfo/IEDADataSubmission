@@ -54,7 +54,7 @@ Inside `BuildingBlockSubmodule/_sources/`:
 - `cdifProperties/` — CDIF-specific building blocks: `cdifMandatory`, `cdifOptional`, `cdifDataCube`, `cdifPhysicalMapping`, `cdifTabularData`, `cdifVariableMeasured`
 - `schemaorgProperties/` — schema.org vocabulary building blocks: `action`, `additionalProperty`, `dataDownload`, `definedTerm`, `identifier`, `person`, `organization`, etc.
 - `adaProperties/` — ADA-specific building blocks: `files`, `instrument`, `laboratory`, detail schemas, etc.
-- `profiles/` — Assembled profile schemas (adaProduct, CDIFDiscovery, CDIFxas, technique profiles)
+- `profiles/` — Assembled profile schemas (adaProduct, CDIFDiscovery, CDIFDataDescription, CDIFxas, technique profiles)
 - `xasProperties/` — XAS-specific building blocks
 - `provProperties/` — Provenance building blocks
 - `qualityProperties/` — Quality measure building blocks
@@ -67,12 +67,12 @@ schema.yaml → resolve_schema.py → resolvedSchema.json → convert_for_jsonfo
 
 Building blocks have parallel files: `schema.yaml` (source) and `{name}Schema.json`. Keep them in sync — run `compare_schemas.py` after editing. Any building block with external `$ref`s should have a `resolvedSchema.json` — run `resolve_schema.py --all` to regenerate them all.
 
-## Profiles (38 total)
+## Profiles (39 total)
 
 - **ADA** (36): `adaProduct` (base) + 35 technique-specific profiles
   - Original 4: `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR`
   - Generated 31: `adaAIVA`, `adaAMS`, `adaARGT`, `adaDSC`, `adaEAIRMS`, `adaFTICRMS`, `adaGCMS`, `adaGPYC`, `adaIC`, `adaICPOES`, `adaL2MS`, `adaLAF`, `adaLCMS`, `adaLIT`, `adaNGNSMS`, `adaNanoIR`, `adaNanoSIMS`, `adaPSFD`, `adaQRIS`, `adaRAMAN`, `adaRITOFNGMS`, `adaSEM`, `adaSIMS`, `adaSLS`, `adaSVRUEC`, `adaTEM`, `adaToFSIMS`, `adaUVFM`, `adaVLM`, `adaXANES`, `adaXCT`
-- **CDIF** (2): `CDIFDiscovery`, `CDIFxas`
+- **CDIF** (3): `CDIFDiscovery`, `CDIFDataDescription`, `CDIFxas`
 
 ## Profile Generator
 

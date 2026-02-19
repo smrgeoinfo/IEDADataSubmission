@@ -125,7 +125,7 @@ My Submissions page shows both:
   • Catalog Records tab → GET /api/catalog/records/?mine=true (catalog)
 ```
 
-Seven profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), `CDIFDiscovery`, and `CDIFxas` (XAS-specific CDIF profile). The profile list is fetched dynamically from the catalog API.
+Profiles are loaded via `load_profiles`: `adaProduct` (base), `adaEMPA`, `adaXRD`, `adaICPMS`, `adaVNMIR` (technique-specific), `CDIFDiscovery`, `CDIFDataDescription` (CDIF distribution extensions for dataCube, tabularData, WebAPI), `CDIFxas` (XAS-specific CDIF profile), and 31 additional generated ADA technique profiles. The profile list is fetched dynamically from the catalog API.
 
 Technique-specific ADA profiles (adaVNMIR, adaEMPA, adaXRD) display measurement detail properties in the form — fields like detector, beamsplitter, spectral resolution for VNMIR, or geometry, wavelength for XRD. These properties come from the building block detail schemas (e.g., `detailVNMIR/`), are preserved in `componentType` during schema conversion, and are surfaced via `PROFILE_MEASUREMENT_CONTROLS` in `uischema_injection.py`. The generic `adaProduct` and CDIF profiles do not show measurement details.
 
@@ -402,6 +402,7 @@ BuildingBlockSubmodule/_sources/
 │   └── xasSubject/            # XAS metadata record subject (requires cdif:profile_xasCDIF)
 └── profiles/
     ├── adaProduct/            # Top-level ADA product profile (composes all BBs)
+    ├── CDIFDataDescription/   # CDIF distribution extensions (dataCube, tabularData, WebAPI)
     └── CDIFxas/               # CDIF XAS profile (CDIF discovery + XAS properties)
 ```
 
@@ -436,6 +437,7 @@ BuildingBlockSubmodule/_sources/jsonforms/profiles/
 ├── adaICPMS/
 ├── adaVNMIR/
 ├── CDIFDiscovery/
+├── CDIFDataDescription/
 └── CDIFxas/
 ```
 
@@ -449,6 +451,7 @@ BuildingBlockSubmodule/build/jsonforms/profiles/
 ├── adaICPMS/schema.json
 ├── adaVNMIR/schema.json
 ├── CDIFDiscovery/schema.json
+├── CDIFDataDescription/schema.json
 └── CDIFxas/schema.json
 ```
 
