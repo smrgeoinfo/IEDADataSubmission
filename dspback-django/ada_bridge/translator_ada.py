@@ -520,7 +520,7 @@ def ada_to_jsonld(ada_record: dict) -> dict:
         A JSON-LD document suitable for loading into the metadata form.
     """
     jsonld: Dict[str, Any] = {
-        "@context": {"schema": "https://schema.org/"},
+        "@context": {"schema": "http://schema.org/"},
         "@type": "schema:Dataset",
     }
 
