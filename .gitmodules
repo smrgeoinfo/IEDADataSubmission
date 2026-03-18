@@ -8,5 +8,5 @@
 	branch = develop
 [submodule "BuildingBlockSubmodule"]
 	path = BuildingBlockSubmodule
-	url = https://github.com/usgin/metadataBuildingBlocks.git
+	url = https://github.com/Cross-Domain-Interoperability-Framework/metadataBuildingBlocks.git
 	branch = main
